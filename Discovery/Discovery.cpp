@@ -7,7 +7,7 @@
 #include <ostream>
 #include <utility>
 
-std::string Discovery::sBroadcastAddress = "192.168.1.255";
+std::string Discovery::sBroadcastAddress = "192.168.0.255";
 int Discovery::sBroadcastPort = 5000;
 
 Discovery::Discovery(std::string pIpAddress, const int pPort)
@@ -25,16 +25,16 @@ void Discovery::Broadcast() const{
     constexpr int broadcastEnable = 1;
     setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &broadcastEnable, sizeof(broadcastEnable));
 
-    sockaddr_in broadcaster_addr {};
-    broadcaster_addr.sin_family = AF_INET;
-    broadcaster_addr.sin_addr.s_addr = inet_addr(sBroadcastAddress.c_str());
-    broadcaster_addr.sin_port = htons(sBroadcastPort);
+    sockaddr_in broadcastAddress {};
+    broadcastAddress.sin_family = AF_INET;
+    broadcastAddress.sin_addr.s_addr = inet_addr(sBroadcastAddress.c_str());
+    broadcastAddress.sin_port = htons(sBroadcastPort);
 
     std::string message = "Hello from server" + vIpAddress;
 
     while (true) {
         sendto(sock, message.c_str(), message.size(), 0,
-               (sockaddr*)&sBroadcastAddress, sizeof(sBroadcastAddress));
+               (sockaddr*)&broadcastAddress, sizeof(broadcastAddress));
 
         std::this_thread::sleep_for(std::chrono::seconds(5));
     }
@@ -63,6 +63,7 @@ void Discovery::Listen() const {
     }
 
     char buffer[1024];
+
     sockaddr_in senderAddr{};
     socklen_t senderLen = sizeof(senderAddr);
 
@@ -73,7 +74,7 @@ void Discovery::Listen() const {
             buffer[len] = '\0';
             std::string senderIp = inet_ntoa(senderAddr.sin_addr);
             if (senderIp != vIpAddress) { // ignore own broadcast
-                std::println("Node at {}", senderIp);
+                std::println("Node at {} with message {}", senderIp, buffer);
             }
         }
     }
