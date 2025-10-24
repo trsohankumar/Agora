@@ -30,7 +30,7 @@ void Discovery::Broadcast() const{
     broadcastAddress.sin_addr.s_addr = inet_addr(sBroadcastAddress.c_str());
     broadcastAddress.sin_port = htons(sBroadcastPort);
 
-    std::string message = "Hello from server" + vIpAddress;
+    std::string message = vIpAddress;
 
     while (true) {
         sendto(sock, message.c_str(), message.size(), 0,
@@ -72,9 +72,9 @@ void Discovery::Listen() const {
                            (sockaddr*)&senderAddr, &senderLen);
         if (len > 0) {
             buffer[len] = '\0';
-            std::string senderIp = inet_ntoa(senderAddr.sin_addr);
-            if (senderIp != vIpAddress) { // ignore own broadcast
-                std::println("Node at {} with message {}", senderIp, buffer);
+            std::string message(buffer, len);
+            if (message != vIpAddress) { // ignore own broadcast
+                std::println("Node at {} with message {}", message, message);
             }
         }
     }
