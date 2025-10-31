@@ -9,6 +9,7 @@
 #include <arpa/inet.h>
 #include <thread>
 
+namespace Agora{
 class Discovery {
 public:
             Discovery(std::string pIpAddress, const int pPort);
@@ -20,6 +21,7 @@ private:
     uint16_t            vPort;
     static std::string  sBroadcastAddress;
     static int          sBroadcastPort;
+};
 };
 
 

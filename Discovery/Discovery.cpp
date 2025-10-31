@@ -7,14 +7,14 @@
 #include <ostream>
 #include <utility>
 
-std::string Discovery::sBroadcastAddress = "192.168.0.255";
-int Discovery::sBroadcastPort = 5000;
+std::string Agora::Discovery::sBroadcastAddress = "192.168.0.255";
+int Agora::Discovery::sBroadcastPort = 5000;
 
-Discovery::Discovery(std::string pIpAddress, const int pPort)
+Agora::Discovery::Discovery(std::string pIpAddress, const int pPort)
     : vIpAddress(std::move(pIpAddress)), vPort(pPort){
 }
 
-void Discovery::Broadcast() const{
+void Agora::Discovery::Broadcast() const{
 
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) {
@@ -40,7 +40,7 @@ void Discovery::Broadcast() const{
     }
 }
 
-void Discovery::Listen() const {
+void Agora::Discovery::Listen() const {
 
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) {
