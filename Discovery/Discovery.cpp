@@ -32,9 +32,10 @@ void Agora::Discovery::Broadcast() const{
     broadcastAddress.sin_addr.s_addr = inet_addr(sBroadcastAddress.c_str());
     broadcastAddress.sin_port = htons(sBroadcastPort);
 
-    std::string message = vIpAddress;
+    std::string message = vIpAddress + " " + std::to_string(vPort);
 
     while (true) {
+        spdlog::info("Sending message: {}", message);
         sendto(sock, message.c_str(), message.size(), 0,
                reinterpret_cast<sockaddr *>(&broadcastAddress), sizeof(broadcastAddress));
 
@@ -75,9 +76,11 @@ void Agora::Discovery::Listen() const {
         if (len > 0) {
             buffer[len] = '\0';
             std::string message(buffer, len);
-            if (message != vIpAddress) { // ignore own broadcast
-                spdlog::info("Node at {} with message {}", message, message);
-            }
+            //if (message != vIpAddress) { // ignore own broadcast
+             //   spdlog::info("Node at {} with message {}", message, message);
+            //}
+
+            spdlog::info("Node at {} with message {}", message, message);
         }
     }
 }
