@@ -14,8 +14,7 @@ class Discovery {
 public:
             Discovery(std::string pIpAddress, const int pPort);
     void    Broadcast() const;
-
-            void Listen() const;
+    void    Listen() const;
 private:
     std::string         vIpAddress;
     uint16_t            vPort;

@@ -6,6 +6,7 @@
 
 #include <ostream>
 #include <utility>
+#include <spdlog/spdlog.h>
 
 std::string Agora::Discovery::sBroadcastAddress = "192.168.0.255";
 int Agora::Discovery::sBroadcastPort = 5000;
@@ -15,10 +16,11 @@ Agora::Discovery::Discovery(std::string pIpAddress, const int pPort)
 }
 
 void Agora::Discovery::Broadcast() const{
+    spdlog::info("Broadcast started");
 
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) {
-        std::println("Error creating socket");
+        spdlog::error("Failed to create socket for broadcasting");
         return;
     }
 
@@ -34,17 +36,17 @@ void Agora::Discovery::Broadcast() const{
 
     while (true) {
         sendto(sock, message.c_str(), message.size(), 0,
-               (sockaddr*)&broadcastAddress, sizeof(broadcastAddress));
+               reinterpret_cast<sockaddr *>(&broadcastAddress), sizeof(broadcastAddress));
 
         std::this_thread::sleep_for(std::chrono::seconds(5));
     }
 }
 
 void Agora::Discovery::Listen() const {
-
+    spdlog::info("Listen started");
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) {
-        std::println("Error creating Listener socket");
+        spdlog::error("Failed to create socket for listening");
         return;
     }
 
@@ -59,7 +61,7 @@ void Agora::Discovery::Listen() const {
     int res = bind(sock, reinterpret_cast<struct sockaddr *>(&receiver_addr), sizeof(receiver_addr));
 
     if (res < 0) {
-        std::println("Error binding socket on server with ip: {}", vIpAddress);
+        spdlog::error("Failed to bind socket for broadcast listening");
     }
 
     char buffer[1024];
@@ -69,12 +71,12 @@ void Agora::Discovery::Listen() const {
 
     while (true) {
         int len = recvfrom(sock, buffer, 1024 - 1, 0,
-                           (sockaddr*)&senderAddr, &senderLen);
+                           reinterpret_cast<sockaddr *>(&senderAddr), &senderLen);
         if (len > 0) {
             buffer[len] = '\0';
             std::string message(buffer, len);
             if (message != vIpAddress) { // ignore own broadcast
-                std::println("Node at {} with message {}", message, message);
+                spdlog::info("Node at {} with message {}", message, message);
             }
         }
     }

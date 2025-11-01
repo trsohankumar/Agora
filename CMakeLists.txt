@@ -12,7 +12,9 @@ find_package(spdlog CONFIG REQUIRED)
 
 add_executable(server main.cpp
         Discovery/Discovery.cpp
-        Discovery/Discovery.h)
+        Discovery/Discovery.h
+        Server/Server.cpp
+        Server/Server.h)
 
 target_link_libraries(server PRIVATE
         nlohmann_json::nlohmann_json
