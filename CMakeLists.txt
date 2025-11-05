@@ -26,11 +26,15 @@ add_executable(server main.cpp
         Discovery/Discovery.cpp
         Discovery/Discovery.h
         Server/Server.cpp
-        Server/Server.h)
+        Server/Server.h
+        Net/Message.h)
+
+target_include_directories(server PRIVATE ${CMAKE_SOURCE_DIR})
 
 target_link_libraries(server PRIVATE
         nlohmann_json::nlohmann_json
         spdlog::spdlog_header_only
         fmt::fmt-header-only
         yaml-cpp::yaml-cpp
+        ${CMAKE_SOURCE_DIR}
 )
