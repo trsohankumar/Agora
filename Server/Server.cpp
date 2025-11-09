@@ -6,7 +6,7 @@
 
 #include <iostream>
 
-Agora::Server::Server() {
+Agora::Server::Server(Configuration config) {
 
     std::cout << "Server created" << std::endl;
     vIpAddress = "127.0.0.1";
@@ -44,10 +44,10 @@ Agora::Server::Server() {
 
     // retrieve port and Ip of the created socket
     vIpAddress = ip_buf;
-    vPort = ntohs(serverAddrSock.sin_port);
-
-
-    vDiscovery = std::make_unique<Agora::Discovery>(vIpAddress, vPort);
+    vPort = stoi(config.getValue("broadcastPort"));
+	vBroadcastAddress = vIpAddress.substr(0, vIpAddress.find_last_of('.')+1) + "255";
+	spdlog::info("Broadcast address: {}", vBroadcastAddress);
+    vDiscovery = std::make_unique<Agora::Discovery>(vIpAddress, vPort, vBroadcastAddress);
 
     // Start Broadcast
     StartBroadCast();
