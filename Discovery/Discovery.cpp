@@ -8,11 +8,8 @@
 #include <utility>
 #include <spdlog/spdlog.h>
 
-std::string Agora::Discovery::sBroadcastAddress = "192.168.0.255";
-int Agora::Discovery::sBroadcastPort = 5000;
-
-Agora::Discovery::Discovery(std::string pIpAddress, const int pPort)
-    : vIpAddress(std::move(pIpAddress)), vPort(pPort){
+Agora::Discovery::Discovery(std::string pIpAddress, const int pPort, std::string broadcastAddress)
+    : vIpAddress(std::move(pIpAddress)), vPort(pPort), sBroadcastAddress(std::move(broadcastAddress)) {
 }
 
 void Agora::Discovery::Broadcast() const{
@@ -30,7 +27,7 @@ void Agora::Discovery::Broadcast() const{
     sockaddr_in broadcastAddress {};
     broadcastAddress.sin_family = AF_INET;
     broadcastAddress.sin_addr.s_addr = inet_addr(sBroadcastAddress.c_str());
-    broadcastAddress.sin_port = htons(sBroadcastPort);
+    broadcastAddress.sin_port = htons(vPort);
 
     std::string message = vIpAddress + " " + std::to_string(vPort);
 
@@ -57,7 +54,7 @@ void Agora::Discovery::Listen() const {
     sockaddr_in receiver_addr {};
     receiver_addr.sin_family = AF_INET;
     receiver_addr.sin_addr.s_addr = INADDR_ANY;
-    receiver_addr.sin_port = htons(sBroadcastPort);
+    receiver_addr.sin_port = htons(vPort);
 
     int res = bind(sock, reinterpret_cast<struct sockaddr *>(&receiver_addr), sizeof(receiver_addr));
 

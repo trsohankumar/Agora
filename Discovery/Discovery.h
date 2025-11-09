@@ -12,14 +12,13 @@
 namespace Agora{
 class Discovery {
 public:
-            Discovery(std::string pIpAddress, const int pPort);
+            Discovery(std::string IpAddress, const int pPort, std::string broadcastAddress);
     void    Broadcast() const;
     void    Listen() const;
 private:
     std::string         vIpAddress;
     uint16_t            vPort;
-    static std::string  sBroadcastAddress;
-    static int          sBroadcastPort;
+    std::string  sBroadcastAddress;
 };
 };
 

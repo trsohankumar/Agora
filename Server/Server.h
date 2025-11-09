@@ -9,12 +9,13 @@
 #include <spdlog/spdlog.h>
 
 #include "../Discovery/Discovery.h"
+#include "../Utility/Configuration.h"
 
 namespace Agora {
 class Server {
 
 public:
-         Server();
+         Server(Configuration config);
     void Listen();
 private:
 
@@ -23,6 +24,7 @@ private:
 
     std::string vIpAddress;
     uint16_t    vPort;
+	std::string vBroadcastAddress;
     std::string vServerIdentifier;
     std::unique_ptr<Agora::Discovery> vDiscovery;
 };
