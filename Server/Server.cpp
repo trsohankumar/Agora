@@ -8,9 +8,11 @@
 
 Agora::Server::Server(Configuration config) {
 
-    std::cout << "Server created" << std::endl;
     vIpAddress = "127.0.0.1";
     std::string publicRoutableIp = "8.8.8.8";
+    vServerIdentifier = uuids::uuid_system_generator{}(); ;
+
+    spdlog::info("Server created with uuid: {}", uuids::to_string(vServerIdentifier));
 
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) {
@@ -47,7 +49,9 @@ Agora::Server::Server(Configuration config) {
     vPort = stoi(config.getValue("broadcastPort"));
 	vBroadcastAddress = vIpAddress.substr(0, vIpAddress.find_last_of('.')+1) + "255";
 	spdlog::info("Broadcast address: {}", vBroadcastAddress);
-    vDiscovery = std::make_unique<Agora::Discovery>(vIpAddress, vPort, vBroadcastAddress);
+    
+    uint16_t broadcastPort = static_cast<uint16_t>(std::stoi(config.getValue("broadcastPort")));
+    vDiscovery = std::make_unique<Agora::Discovery>(vServerIdentifier, vIpAddress, vPort, vBroadcastAddress, broadcastPort);
 
     // Start Broadcast
     StartBroadCast();
@@ -57,7 +61,6 @@ Agora::Server::Server(Configuration config) {
 }
 
 void Agora::Server::StartBroadCast() {
-
     // setup thread for broadcasting
     std::thread(&Agora::Discovery::Broadcast, vDiscovery.get()).detach();
 }

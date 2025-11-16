@@ -1,26 +1,28 @@
 //
 // Created by Sohankumar Rajeeshkumar on 24.10.25.
 //
+#pragma once
 
-#ifndef DS1_PROJECT_DISCOVERY_H
-#define DS1_PROJECT_DISCOVERY_H
 #include <string>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <thread>
+#include <uuid.h>
+#include <spdlog/spdlog.h>
+#include <chrono>
+#include <nlohmann/json.hpp>
+
+#include "../Utility/Message.h"
 
 namespace Agora{
 class Discovery {
 public:
-            Discovery(std::string IpAddress, const int pPort, std::string broadcastAddress);
+            Discovery(uuids::uuid pEntityId, std::string pIpAddress, const uint16_t pPort, std::string pBroadcastAddress, const uint16_t pBroadcastPort);
     void    Broadcast() const;
     void    Listen() const;
 private:
-    std::string         vIpAddress;
-    uint16_t            vPort;
-    std::string  sBroadcastAddress;
+    Agora::Message::Discovery   vDiscoveryMessage;
+    std::string                 vBroadcastAddress;
+    uint16_t                    vBroadcastPort;
 };
 };
-
-
-#endif //DS1_PROJECT_DISCOVERY_H

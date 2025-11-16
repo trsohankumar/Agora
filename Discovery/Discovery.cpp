@@ -4,27 +4,8 @@
 
 #include "Discovery.h"
 
-#include <chrono>
-#include <cstring>
-#include <string>
-#include <thread>
-#include <unistd.h>
-#include <cerrno>
-
-#include <arpa/inet.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-
-#include <nlohmann/json.hpp>
-#include "Net/Message.h"
-
-using nlohmann::json;
-#include <ostream>
-#include <utility>
-#include <spdlog/spdlog.h>
-
-Agora::Discovery::Discovery(std::string pIpAddress, const int pPort, std::string broadcastAddress)
-    : vIpAddress(std::move(pIpAddress)), vPort(pPort), sBroadcastAddress(std::move(broadcastAddress)) {
+Agora::Discovery::Discovery(uuids::uuid pEntityId, std::string pIpAddress, const uint16_t pPort, std::string pBroadcastAddress, const uint16_t pBroadcastPort)
+    :vDiscoveryMessage(std::move(pEntityId), std::move(pIpAddress), pPort), vBroadcastAddress(std::move(pBroadcastAddress)), vBroadcastPort(pBroadcastPort) {
 }
 
 void Agora::Discovery::Broadcast() const{
@@ -45,33 +26,19 @@ void Agora::Discovery::Broadcast() const{
 
     sockaddr_in broadcastAddress{};
     broadcastAddress.sin_family      = AF_INET;
-    broadcastAddress.sin_addr.s_addr = ::inet_addr(sBroadcastAddress.c_str()); 
-    broadcastAddress.sin_port = htons(static_cast<uint16_t>(sBroadcastPort)); // changed to support macOS later lets see what to do with it i faced an error so changed it
-
-    // Build the JSON object for broadcast
-    Agora::NodeInfo info;
-    info.nodeId = "agora-" + std::to_string(::getpid()); // simple unique id
-    info.ip     = vIpAddress;                             // advertise what you already had
-    info.port   = vPort;
-    info.status = "online";
+    broadcastAddress.sin_addr.s_addr = ::inet_addr(vBroadcastAddress.c_str()); 
+    broadcastAddress.sin_port        = htons(vBroadcastPort);
 
     while (true) {
-        // for updating timestamp each time we send
-        info.timestampMs = static_cast<std::uint64_t>(
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now().time_since_epoch()
-            ).count()
-        );
+        
+        nlohmann::json discoveryMessage = vDiscoveryMessage.toJson();
+        const std::string payload = discoveryMessage.dump();
 
-        json j = info;
-        const std::string payload = j.dump();
+        spdlog::debug("Broadcasting {} bytes to {}:{}", payload.size(), vBroadcastAddress, vBroadcastPort);
 
-        spdlog::debug("Broadcasting {} bytes to {}:{}",
-                      payload.size(), sBroadcastAddress, sBroadcastPort);
+        const ssize_t sent = ::sendto(sock, payload.data(), payload.size(), 0, reinterpret_cast<sockaddr*>(&broadcastAddress),
+            sizeof(broadcastAddress));
 
-        const ssize_t sent = ::sendto(sock, payload.data(), payload.size(), 0,
-                                      reinterpret_cast<sockaddr*>(&broadcastAddress),
-                                      sizeof(broadcastAddress));
         if (sent < 0) {
             spdlog::warn("Broadcast sendto failed: {}", std::strerror(errno));
         }
@@ -79,7 +46,6 @@ void Agora::Discovery::Broadcast() const{
         std::this_thread::sleep_for(std::chrono::seconds(5));
     }
 
-    // (unreachable, but fine if you later add a stop condition)
     ::close(sock);
 }
 
@@ -95,48 +61,47 @@ void Agora::Discovery::Listen() const {
     constexpr int reusePortEnable = 1;
     setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &reusePortEnable, sizeof(reusePortEnable));
 
-    sockaddr_in receiver_addr {};
-    receiver_addr.sin_family = AF_INET;
-    receiver_addr.sin_addr.s_addr = INADDR_ANY;
-    receiver_addr.sin_port = htons(vPort);
+    sockaddr_in receiverAddr {};
+    receiverAddr.sin_family = AF_INET;
+    receiverAddr.sin_addr.s_addr = INADDR_ANY;
+    receiverAddr.sin_port = htons(vBroadcastPort);
 
     if (::bind(sock, reinterpret_cast<sockaddr*>(&receiverAddr), sizeof(receiverAddr)) < 0) {
-        spdlog::error("bind() failed on port {}: {}", sBroadcastPort, std::strerror(errno));
+        spdlog::error("bind() failed on port {}: {}", vBroadcastPort, std::strerror(errno));
         ::close(sock);
         return;
     }
 
-    spdlog::info("Listening for UDP on port {}", sBroadcastPort);
+    spdlog::info("Listening for UDP on port {}", vBroadcastPort);
 
     std::string buf(8192, '\0');
+
     sockaddr_in senderAddr{};
     socklen_t senderLen = sizeof(senderAddr);
 
     while (true) {
-        const ssize_t n = ::recvfrom(sock, buf.data(), buf.size() - 1, 0,
-                                     reinterpret_cast<sockaddr*>(&senderAddr), &senderLen);
-        if (n < 0) {
+        const ssize_t payloadSize = ::recvfrom(sock, buf.data(), buf.size() - 1, 0,
+            reinterpret_cast<sockaddr*>(&senderAddr), &senderLen);
+
+        if (payloadSize < 0) {
             if (errno == EINTR) continue;
             spdlog::warn("recvfrom() failed: {}", std::strerror(errno));
             continue;
         }
-        buf[n] = '\0';
+
+        buf[payloadSize] = '\0';
 
         try {
-            nlohmann::json j = nlohmann::json::parse(buf.c_str(), buf.c_str() + n);
-            Agora::NodeInfo other{};
-            from_json(j, other);
+            nlohmann::json discoveredMessage = nlohmann::json::parse(buf.c_str(), buf.c_str() + payloadSize);
+            Agora::Message::Discovery discoveredNode;
+            discoveredNode.fromJson(discoveredMessage);
 
-            /
-            const std::string selfId = "agora-" + std::to_string(::getpid());
-            if (other.nodeId == selfId) continue;
+            if (discoveredNode.uEntityId == vDiscoveryMessage.uEntityId) continue;
 
-            char srcIp[INET_ADDRSTRLEN]{};
-            ::inet_ntop(AF_INET, &senderAddr.sin_addr, srcIp, sizeof(srcIp));
+            spdlog::info("Discovery: <Id: {}, Ip: {}, Port: {}> discovered <Id: {}, Ip: {}, Port: {}>",
+                uuids::to_string(vDiscoveryMessage.uEntityId), vDiscoveryMessage.uIpAddress, vDiscoveryMessage.uPort,
+                uuids::to_string(discoveredNode.uEntityId), discoveredNode.uIpAddress, discoveredNode.uPort);
 
-            spdlog::info("Discovery: from {}:{}  id={} ip={} port={} status={} t={}",
-                         srcIp, ntohs(senderAddr.sin_port),
-                         other.nodeId, other.ip, other.port, other.status, other.timestampMs);
         } catch (const std::exception& e) {
             spdlog::warn("Failed to parse incoming JSON: {}", e.what());
         }

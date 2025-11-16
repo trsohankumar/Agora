@@ -12,29 +12,45 @@ endif()
 FetchContent_Declare(
         yaml-cpp
         GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
-        GIT_TAG 0.8.0
+        GIT_TAG master
 )
 FetchContent_MakeAvailable(yaml-cpp)
 
+FetchContent_Declare(json URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz)
+FetchContent_MakeAvailable(json)
 
-find_package(nlohmann_json CONFIG REQUIRED)
-find_package(spdlog CONFIG REQUIRED)
+FetchContent_Declare(
+        spdlog
+        GIT_REPOSITORY https://github.com/gabime/spdlog
+        GIT_TAG v1.16.0
+)
+FetchContent_MakeAvailable(spdlog)
+
+FetchContent_Declare(
+    stduuid
+    GIT_REPOSITORY https://github.com/mariusbancila/stduuid.git
+    GIT_TAG        master
+)
+FetchContent_MakeAvailable(stduuid)
+
 
 add_executable(server main.cpp
         Utility/Configuration.cpp
         Utility/Configuration.h
+        Utility/Message.h
+        Utility/Message.cpp
         Discovery/Discovery.cpp
         Discovery/Discovery.h
         Server/Server.cpp
-        Server/Server.h
-        Net/Message.h)
+        Server/Server.h)
 
-target_include_directories(server PRIVATE ${CMAKE_SOURCE_DIR})
+target_include_directories(server PRIVATE 
+        ${CMAKE_SOURCE_DIR}
+        ${stduuid_SOURCE_DIR}/include
+        )
 
 target_link_libraries(server PRIVATE
         nlohmann_json::nlohmann_json
         spdlog::spdlog_header_only
-        fmt::fmt-header-only
         yaml-cpp::yaml-cpp
-        ${CMAKE_SOURCE_DIR}
 )

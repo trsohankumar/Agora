@@ -2,12 +2,11 @@
 // Created by Sohankumar Rajeeshkumar on 01.11.25.
 //
 
-#ifndef AGORA_SERVER_H
-#define AGORA_SERVER_H
+#pragma once
 #include <string>
 #include <arpa/inet.h>
 #include <spdlog/spdlog.h>
-
+#include <uuid.h>
 #include "../Discovery/Discovery.h"
 #include "../Utility/Configuration.h"
 
@@ -22,13 +21,10 @@ private:
     void StartBroadCast();
     void ListenBroadCast();
 
-    std::string vIpAddress;
-    uint16_t    vPort;
-	std::string vBroadcastAddress;
-    std::string vServerIdentifier;
-    std::unique_ptr<Agora::Discovery> vDiscovery;
+    uuids::uuid                         vServerIdentifier;
+    std::string                         vIpAddress;
+    uint16_t                            vPort;
+	std::string                         vBroadcastAddress;
+    std::unique_ptr<Agora::Discovery>   vDiscovery;
 };
 };
-
-
-#endif //AGORA_SERVER_H
