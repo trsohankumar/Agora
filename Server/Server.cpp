@@ -8,9 +8,11 @@
 
 Agora::Server::Server(Configuration config) {
 
+    
+    vServerIdentifier = generateRandomUuid();
+
     vIpAddress = "127.0.0.1";
     std::string publicRoutableIp = "8.8.8.8";
-    vServerIdentifier = uuids::uuid_system_generator{}(); ;
 
     spdlog::info("Server created with uuid: {}", uuids::to_string(vServerIdentifier));
 
