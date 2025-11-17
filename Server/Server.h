@@ -9,6 +9,7 @@
 #include <uuid.h>
 #include "../Discovery/Discovery.h"
 #include "../Utility/Configuration.h"
+#include "../Utility/UuidGeneration.h"
 
 namespace Agora {
 class Server {

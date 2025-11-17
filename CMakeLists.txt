@@ -29,7 +29,7 @@ FetchContent_MakeAvailable(spdlog)
 FetchContent_Declare(
     stduuid
     GIT_REPOSITORY https://github.com/mariusbancila/stduuid.git
-    GIT_TAG        master
+    GIT_TAG        v1.2.3
 )
 FetchContent_MakeAvailable(stduuid)
 
@@ -39,6 +39,8 @@ add_executable(server main.cpp
         Utility/Configuration.h
         Utility/Message.h
         Utility/Message.cpp
+        Utility/UuidGeneration.h
+        Utility/UuidGeneration.cpp
         Discovery/Discovery.cpp
         Discovery/Discovery.h
         Server/Server.cpp
@@ -46,11 +48,11 @@ add_executable(server main.cpp
 
 target_include_directories(server PRIVATE 
         ${CMAKE_SOURCE_DIR}
-        ${stduuid_SOURCE_DIR}/include
-        )
+)
 
 target_link_libraries(server PRIVATE
         nlohmann_json::nlohmann_json
         spdlog::spdlog_header_only
         yaml-cpp::yaml-cpp
+        stduuid
 )
