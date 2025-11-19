@@ -13,13 +13,14 @@
 #include <nlohmann/json.hpp>
 
 #include "../Utility/Message.h"
+#include "../Node/Node.h"
 
 namespace Agora{
 class Discovery {
 public:
             Discovery(uuids::uuid pEntityId, std::string pIpAddress, const uint16_t pPort, std::string pBroadcastAddress, const uint16_t pBroadcastPort);
     void    Broadcast() const;
-    void    Listen() const;
+    void    Listen(std::vector<Agora::Node>& pDiscoveredNodes, std::mutex& pDiscoveredNodesMutex ) const;
 private:
     Agora::Message::Discovery   vDiscoveryMessage;
     std::string                 vBroadcastAddress;

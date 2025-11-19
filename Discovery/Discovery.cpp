@@ -49,10 +49,10 @@ void Agora::Discovery::Broadcast() const{
     ::close(sock);
 }
 
-void Agora::Discovery::Listen() const {
+void Agora::Discovery::Listen(std::vector<Agora::Node>& pDiscoveredNodes, std::mutex& pDiscoveredNodesMutex) const {
     spdlog::info("Listen started");
 
-    int sock = ::socket(AF_INET, SOCK_DGRAM, 0);
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) {
         spdlog::error("Failed to create socket for listening: {}", std::strerror(errno));
         return;
@@ -66,9 +66,9 @@ void Agora::Discovery::Listen() const {
     receiverAddr.sin_addr.s_addr = INADDR_ANY;
     receiverAddr.sin_port = htons(vBroadcastPort);
 
-    if (::bind(sock, reinterpret_cast<sockaddr*>(&receiverAddr), sizeof(receiverAddr)) < 0) {
+    if (bind(sock, reinterpret_cast<sockaddr*>(&receiverAddr), sizeof(receiverAddr)) < 0) {
         spdlog::error("bind() failed on port {}: {}", vBroadcastPort, std::strerror(errno));
-        ::close(sock);
+        close(sock);
         return;
     }
 
@@ -107,6 +107,6 @@ void Agora::Discovery::Listen() const {
         }
     }
 
-    ::close(sock); 
+    close(sock); 
 }
 

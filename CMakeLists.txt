@@ -41,6 +41,8 @@ add_executable(server main.cpp
         Utility/Message.cpp
         Utility/UuidGeneration.h
         Utility/UuidGeneration.cpp
+        Node/Node.h
+        Node/Node.cpp
         Discovery/Discovery.cpp
         Discovery/Discovery.h
         Server/Server.cpp

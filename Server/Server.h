@@ -9,7 +9,7 @@
 #include <uuid.h>
 #include "../Discovery/Discovery.h"
 #include "../Utility/Configuration.h"
-#include "../Utility/UuidGeneration.h"
+#include "../Node/Node.h"
 
 namespace Agora {
 class Server {
@@ -22,10 +22,10 @@ private:
     void StartBroadCast();
     void ListenBroadCast();
 
-    uuids::uuid                         vServerIdentifier;
-    std::string                         vIpAddress;
-    uint16_t                            vPort;
+    Agora::Node                         vServerDetails;
 	std::string                         vBroadcastAddress;
     std::unique_ptr<Agora::Discovery>   vDiscovery;
+    std::vector<Agora::Node>            vDiscoveredPeers;
+    std::mutex                          vDiscoveredPeersMutex;
 };
 };
