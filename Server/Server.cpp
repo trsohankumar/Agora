@@ -4,56 +4,16 @@
 
 #include "Server.h"
 
-#include <iostream>
+Agora::Server::Server(Configuration config)
+    : vServerDetails() {
 
-Agora::Server::Server(Configuration config) {
+    spdlog::info("Server created with uuid: {}", uuids::to_string(vServerDetails.getNodeIdentifier()));
 
-    
-    vServerIdentifier = generateRandomUuid();
-
-    vIpAddress = "127.0.0.1";
-    std::string publicRoutableIp = "8.8.8.8";
-
-    spdlog::info("Server created with uuid: {}", uuids::to_string(vServerIdentifier));
-
-    int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0) {
-        spdlog::error("Error creating socket");
-        return;
-    }
-
-    sockaddr_in send_addr {};
-    send_addr.sin_family = AF_INET;
-    send_addr.sin_port = 1234; // the os can now assign any available port
-
-    inet_pton(AF_INET, publicRoutableIp.c_str(), &send_addr.sin_addr);
-
-    if (connect(sock, reinterpret_cast<sockaddr *>(&send_addr), sizeof(send_addr) ) < 0) {
-        spdlog::error("Error connecting to 8.8.8.8");
-        close(sock);
-        return;
-    }
-
-    sockaddr_in serverAddrSock {};
-    socklen_t serverAddrSockLen = sizeof(serverAddrSock);
-    if (getsockname(sock, reinterpret_cast<sockaddr *>(&serverAddrSock), &serverAddrSockLen) < 0) {
-        spdlog::error("Error getting local ip address socket");
-        close(sock);
-        return;
-    }
-
-    // now get local ip and random port on which server can run
-    char ip_buf[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &serverAddrSock.sin_addr, ip_buf, sizeof(ip_buf));
-
-    // retrieve port and Ip of the created socket
-    vIpAddress = ip_buf;
-    vPort = stoi(config.getValue("broadcastPort"));
-	vBroadcastAddress = vIpAddress.substr(0, vIpAddress.find_last_of('.')+1) + "255";
+	vBroadcastAddress = vServerDetails.getNodeIpAddress().substr(0, vServerDetails.getNodeIpAddress().find_last_of('.')+1) + "255";
 	spdlog::info("Broadcast address: {}", vBroadcastAddress);
     
     uint16_t broadcastPort = static_cast<uint16_t>(std::stoi(config.getValue("broadcastPort")));
-    vDiscovery = std::make_unique<Agora::Discovery>(vServerIdentifier, vIpAddress, vPort, vBroadcastAddress, broadcastPort);
+    vDiscovery = std::make_unique<Agora::Discovery>(vServerDetails.getNodeIdentifier(), vServerDetails.getNodeIpAddress(), vServerDetails.getNodePort(), vBroadcastAddress, broadcastPort);
 
     // Start Broadcast
     StartBroadCast();
@@ -68,12 +28,12 @@ void Agora::Server::StartBroadCast() {
 }
 
 void Agora::Server::ListenBroadCast() {
-   std::thread(&Agora::Discovery::Listen, vDiscovery.get()).detach();
+   std::thread(&Agora::Discovery::Listen, vDiscovery.get(), std::ref(vDiscoveredPeers), std::ref(vDiscoveredPeersMutex)).detach();
 }
 
 void Agora::Server::Listen() {
 
-    spdlog::info("Server with ip: {} Listening on Port: {}", vIpAddress, vPort);
+    spdlog::info("Server with ip: {} Listening on Port: {}", vServerDetails.getNodeIpAddress(), vServerDetails.getNodePort());
     while (true) {
     }
 }
