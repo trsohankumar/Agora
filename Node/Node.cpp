@@ -51,6 +51,8 @@ Agora::Node::Node (uuids::uuid pNodeIdentifier,std::string pIpAddress, uint16_t 
 
 }
 
+
+
 uuids::uuid Agora::Node::getNodeIdentifier() const
 {
     return vNodeIdentifier;
@@ -64,4 +66,29 @@ std::string Agora::Node::getNodeIpAddress() const
 uint16_t    Agora::Node::getNodePort() const                                                        
 {
     return vPort;
+}
+
+nlohmann::json Agora::Node::toJson() const
+{
+    nlohmann::json jsonNode = nlohmann::json{
+        {"uuid", uuids::to_string(vNodeIdentifier)},
+        {"ip", vIpAddress},
+        {"port", vPort},
+    };
+
+    return jsonNode;
+}
+
+void Agora::Node::fromJson(const nlohmann::json& pJsonNode) {
+    std::string tempEntityId;
+    pJsonNode.at("uuid").get_to(tempEntityId);
+    vNodeIdentifier= uuids::uuid::from_string(tempEntityId).value();
+
+    pJsonNode.at("ip").get_to(vIpAddress);
+    pJsonNode.at("port").get_to(vPort);
+}
+
+Agora::Node::Node(const nlohmann::json& pJsonNode)
+{
+    fromJson(pJsonNode);
 }

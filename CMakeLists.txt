@@ -37,8 +37,6 @@ FetchContent_MakeAvailable(stduuid)
 add_executable(server main.cpp
         Utility/Configuration.cpp
         Utility/Configuration.h
-        Utility/Message.h
-        Utility/Message.cpp
         Utility/UuidGeneration.h
         Utility/UuidGeneration.cpp
         Node/Node.h

@@ -24,7 +24,7 @@ Agora::Server::Server(Configuration config)
 
 void Agora::Server::StartBroadCast() {
     // setup thread for broadcasting
-    std::thread(&Agora::Discovery::Broadcast, vDiscovery.get()).detach();
+    std::thread(&Agora::Discovery::Broadcast, vDiscovery.get(),std::ref(vDiscoveredPeers), std::ref(vDiscoveredPeersMutex)).detach();
 }
 
 void Agora::Server::ListenBroadCast() {
