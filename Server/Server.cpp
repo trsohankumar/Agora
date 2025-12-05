@@ -5,7 +5,7 @@
 #include "Server.h"
 
 Agora::Server::Server(Configuration config)
-    : vServerDetails() {
+    : vServerDetails() , vHeartBeatTimeOut(10000), vHeartBeat(){
 
     spdlog::info("Server created with uuid: {}", uuids::to_string(vServerDetails.getNodeIdentifier()));
 
@@ -20,6 +20,12 @@ Agora::Server::Server(Configuration config)
 
     // list to BroadCast
     ListenBroadCast();
+    
+    spdlog::info("Switching to follower state");
+    // Server has joined the network and switches itself to follower mode where it awaits HeartBeat
+    behavior = Agora::BEHAVIOR::FOLLOWER;
+
+    Listen();
 }
 
 void Agora::Server::StartBroadCast() {
@@ -31,9 +37,47 @@ void Agora::Server::ListenBroadCast() {
    std::thread(&Agora::Discovery::Listen, vDiscovery.get(), std::ref(vDiscoveredPeers), std::ref(vDiscoveredPeersMutex)).detach();
 }
 
+void Agora::Server::startFollowerState() {
+    // Wait for HeartBeat
+    while (true) {
+    	bool isLeaderAvailable = vHeartBeat.receiveHeartBeat(vHeartBeatTimeOut);
+		// If timedout change state to Candiddate
+		if(!isLeaderAvailable) {
+   			spdlog::info("Failed to receive HeartBeat from server");
+    		behavior = Agora::BEHAVIOR::CANDIDATE;
+    		return;
+ 		}
+		// Else Add entry to log
+		spdlog::info("Heartbeat: {}");
+
+
+    }
+
+}
+
+
+void startElection(){
+
+}
+
 void Agora::Server::Listen() {
 
-    spdlog::info("Server with ip: {} Listening on Port: {}", vServerDetails.getNodeIpAddress(), vServerDetails.getNodePort());
-    while (true) {
+    while(true) {
+        switch (behavior) {
+        case Agora::BEHAVIOR::FOLLOWER:
+           // Follower based code
+        spdlog::info("Server in Follower State");
+        startFollowerState();
+        break;
+        case Agora::BEHAVIOR::CANDIDATE:
+        spdlog::info("Server in Candidate State");
+        startElection();
+        break;
+        // Initiate election process
+        case Agora::BEHAVIOR::LEADER:
+	    spdlog::info("Server in Leader State");
+        break;
+        }
     }
+
 }

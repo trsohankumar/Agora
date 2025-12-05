@@ -44,7 +44,10 @@ add_executable(server main.cpp
         Discovery/Discovery.cpp
         Discovery/Discovery.h
         Server/Server.cpp
-        Server/Server.h)
+        Server/Server.h
+        Server/HeartBeat/HeartBeat.h
+        Server/HeartBeat/HeartBeat.cpp
+        )
 
 target_include_directories(server PRIVATE 
         ${CMAKE_SOURCE_DIR}
