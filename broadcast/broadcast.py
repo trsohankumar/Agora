@@ -1,5 +1,6 @@
 import socket
 import json
+from message.message_handler import MessageHandler
 from loguru import logger
 
 class Broadcast:
@@ -15,7 +16,7 @@ class Broadcast:
         logger.info(f"Sending broadcast on ip:{self.broadcast_address}, port: {self.broadcast_port}")
         broadcast_sock.sendto(json.dumps(message).encode(), (self.broadcast_address, self.broadcast_port))
 
-    def listen_broadcast(self):
+    def listen_broadcast(self, message_queue: MessageHandler):
         broadcast_listen_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         broadcast_listen_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         broadcast_listen_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
@@ -24,4 +25,4 @@ class Broadcast:
         while True:
             data, addr = broadcast_listen_sock.recvfrom(self.broadcast_recv_buffer_size)
             msg = json.loads(data.decode())
-            logger.info(f"received broadcast message: {msg}")
+            message_queue.add_message(msg)
