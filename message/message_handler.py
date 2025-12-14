@@ -4,9 +4,10 @@ import threading
 
 class MessageHandler:
 
-    def __init__(self):
+    def __init__(self, server):
         self.message_queue = queue.Queue()
         self.worker_thread = None 
+        self.server = server
         pass
 
     def add_message(self, msg):
@@ -25,5 +26,19 @@ class MessageHandler:
                 continue
 
     def _handle_message(self, msg):
-        logger.info(f"Handling message: {msg}")
-        
+        if msg["id"] != str(self.server.server_id):
+            if msg["type"] == "DISC":
+                logger.info(f"Handling message: {msg}")
+                if self.server.peer_list.get_node(msg["id"]) == None:
+                    self.server.peer_list.add_node(msg["id"], {"ip": msg["ip"], "port": msg["port"]})
+                    return_messge = {
+                        "type": "DISC_RESP",
+                        "ip": self.server.server_ip,
+                        "port": self.server.server_port,
+                        "id": str(self.server.server_id)
+                    }
+                    self.server.unicast.send_message(return_messge, msg["ip"], msg["port"])
+            elif msg["type"] == "DISC_RESP":
+                logger.info(f"Handling message: {msg}")
+                if self.server.peer_list.get_node(msg["id"]) == None:
+                    self.server.peer_list.add_node(msg["id"], {"ip": msg["ip"], "port": msg["port"]})
