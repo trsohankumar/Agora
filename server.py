@@ -23,7 +23,7 @@ class Server:
         self.server_ip = res["ip"]
         self.server_port = res["port"]
         self.peer_list = NodeList()
-        logger.info(f"Server starting with id: {self.server_id}, ip: k{self.server_ip}, port: {self.server_port}")
+        logger.info(f"Server starting with id: {self.server_id}, ip: {self.server_ip}, port: {self.server_port}")
         # setup message resolver for the server
         self.message_queue = MessageHandler(self)
 
@@ -31,7 +31,7 @@ class Server:
         self.unicast = Unicast(unicast_ip= self.server_ip, unicast_port=self.server_port)
 
         # setup broadcast communication for the server
-        self.broadcast = Broadcast()
+        self.broadcast = Broadcast(self.server_ip)
 
 
     def start_server(self):

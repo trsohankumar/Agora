@@ -8,7 +8,6 @@ class MessageHandler:
         self.message_queue = queue.Queue()
         self.worker_thread = None 
         self.server = server
-        pass
 
     def add_message(self, msg):
         self.message_queue.put(msg)
