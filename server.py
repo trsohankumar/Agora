@@ -135,7 +135,7 @@ class Server:
             
             total_nodes = len(self.peer_list.get_all_node()) + 1
             if len(self.votes_received) > (total_nodes / 2):
-                logger.info(f"Server: {self.server_id} has won the election")
+                logger.info(f"Server: {self.server_id} has won the election for term: {self.current_term}")
                 self.state = ServerState.LEADER
                 peers = self.peer_list.get_all_node()
                 for peer_id in peers.keys():
@@ -175,7 +175,7 @@ class Server:
         }
 
         self.unicast.send_message(vote_response, msg["ip"], msg["port"])
-        logger.info(f"Vote {'GRANTED' if grant_vote else 'DENIED'} for {msg['id']}")
+        logger.info(f"Vote {'GRANTED' if grant_vote else 'DENIED'} for {msg['id']} for term: {self.current_term}")
 
     def handle_vote_resp(self, msg):
         with self.state_lock:
