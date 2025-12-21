@@ -41,3 +41,7 @@ class MessageHandler:
                 logger.info(f"Handling message: {msg}")
                 if self.server.peer_list.get_node(msg["id"]) == None:
                     self.server.peer_list.add_node(msg["id"], {"ip": msg["ip"], "port": msg["port"]})
+            elif msg["type"] == "VOTE_REQ":
+                self.server.handle_request_vote(msg)
+            elif msg["type"] == "VOTE_RESP":
+                self.server.handle_vote_resp(msg)

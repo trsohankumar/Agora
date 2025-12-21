@@ -14,7 +14,7 @@ class Broadcast:
 
     def _get_broadcast_ip(self, node_ip):
 
-        address = ".".join(node_ip.split(".")[:3]) + "255"
+        address = ".".join(node_ip.split(".")[:3]) + "." + "255"
         return address
 
 
