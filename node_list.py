@@ -1,4 +1,14 @@
 import threading
+class Node:
+
+    def __init__(self, _id, ip_address, port):
+        self._id = _id
+        self.ip_address = ip_address
+        self.port = port
+
+    def __eq__(self, value):
+        return self._id == value._id
+
 
 class NodeList:
     
@@ -26,3 +36,4 @@ class NodeList:
     def remove_node(self, node_id):
         with self.lock:
             return self.nodes.pop(node_id, None)
+        

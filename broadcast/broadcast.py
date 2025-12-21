@@ -5,10 +5,10 @@ import threading
 from loguru import logger
 
 class Broadcast:
-    def __init__(self):
-        self.broadcast_address = "192.168.0.255"
-        self.broadcast_port    = 5000
-        self.broadcast_timeout = 5
+    def __init__(self, ip_address, port):
+        self.broadcast_address = '.'.join(ip_address.split('.')[:-1] + ['255'])
+        self.broadcast_port    = port
+        self.broadcast_timeout = 5  
         self.broadcast_recv_buffer_size = 1024
         self.worker_thread = None
 
