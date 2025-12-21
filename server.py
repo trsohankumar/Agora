@@ -139,7 +139,7 @@ class Server:
                 return
             
             total_nodes = len(self.peer_list.get_all_node()) + 1
-            if len(self.votes_received) > (total_nodes / 2):
+            if len(self.votes_received) >= (total_nodes / 2):
                 logger.info(f"Server: {self.server_id} has won the election for term: {self.current_term}")
                 self.state = ServerState.LEADER
                 peers = self.peer_list.get_all_node()
