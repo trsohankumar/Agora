@@ -45,3 +45,5 @@ class MessageHandler:
                 self.server.handle_request_vote(msg)
             elif msg["type"] == "VOTE_RESP":
                 self.server.handle_vote_resp(msg)
+            elif msg["type"] == "APPEND_ENTRIES":
+                self.server.handle_append_entries(msg)

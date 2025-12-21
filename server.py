@@ -59,6 +59,7 @@ class Server:
         self.last_heartbeat_time = time.time()
         self.votes_received = set()
         self.state_lock = threading.Lock()
+        self.heartbeat_interval = 0.05
     
     def _get_random_election_timeout(self):
         return random.uniform(0.15, 0.30)
@@ -100,7 +101,11 @@ class Server:
                     logger.info("Candidate timeout occurred. Starting new election")
                     self.transisiton_to_candidate()
             elif current_state == ServerState.LEADER:
-                pass
+                self.send_heartbeat()
+                time.sleep(self.heartbeat_interval)
+                continue
+
+            time.sleep(self.heartbeat_interval)
 
     def transisiton_to_candidate(self):
         with self.state_lock:
@@ -165,6 +170,7 @@ class Server:
                         grant_vote = True
                         self.voted_for = msg["id"]
                         self.last_heartbeat_time = time.time()
+
             current_term = self.current_term
         vote_response = {
             "type" : "VOTE_RESP",
@@ -188,6 +194,50 @@ class Server:
 
         self.check_election_won()
 
+    def send_heartbeat(self):
+        peers = self.peer_list.get_all_node()
+
+        with self.state_lock:
+            current_term = self.current_term
+
+        for peer_id, peer_info in peers.items():
+            heartbeat_msg = {
+                "type": "APPEND_ENTRIES",
+                "term": current_term,
+                "id": str(self.server_id),
+                "ip": self.server_ip,
+                "port": self.server_port,
+                "prev_log_index": len(self.log) - 1,
+                "prev_log_term": self.log[-1]["term"] if self.log else 0,
+                "leader_commit": self.commit_index
+            }
+            self.unicast.send_message(heartbeat_msg, peer_info["ip"], peer_info["port"])
+
+    def handle_append_entries(self, msg):
+        with self.state_lock:
+            if msg["term"] < self.current_term:
+                resp = False
+                current_term = self.current_term
+            else:
+                if msg["term"] > self.current_term:
+                    self.current_term = msg["term"]
+                    self.voted_for = None
+
+                self.state = ServerState.FOLLOWER
+
+                self.last_heartbeat_time = time.time()
+
+                current_term = self.current_term
+                resp = True
+                logger.info(f"Received heartbeat from the leader: {msg['id']} for term {self.current_term}")
+        append_entries_response = {
+            "type": "APPEND_ENTRIES_RESP",
+            "term": current_term,
+            "success": resp,
+            "id": str(self.server_id)
+        }
+
+        self.unicast.send_message(append_entries_response, msg["ip"], msg["port"])
 
 if __name__ == "__main__":
 
