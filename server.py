@@ -94,6 +94,7 @@ class Server:
             return
         response_message = {
             "type": "DISCOVER_LEADER",
+            "id": self.server_id,
             "ip": self.server_ip,
             "port": self.server_port
         }
@@ -235,8 +236,8 @@ class Server:
         self.check_election_won()
 
     def send_heartbeat(self):
+        logger.info("sending heartbeats")
         while True:
-            logger.info("sending heartbeats")
             peers = self.peer_list.get_all_node()
 
             with self.state_lock:
