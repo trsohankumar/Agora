@@ -94,7 +94,7 @@ class Server:
             return
         response_message = {
             "type": "DISCOVER_LEADER",
-            "id": self.server_id,
+            "id": str(self.server_id),
             "ip": self.server_ip,
             "port": self.server_port
         }
