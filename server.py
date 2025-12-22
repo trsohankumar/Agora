@@ -54,9 +54,30 @@ class Server:
     
     def _get_random_election_timeout(self):
         return random.uniform(0.15, 0.30)
+    
+    def handle_disc_resp(self, msg):
+        logger.info(f"Handling message: {msg}")
+        if self.peer_list.get_node(msg["id"]) == None:
+            self.peer_list.add_node(msg["id"], {"ip": msg["ip"], "port": msg["port"]})
 
+    def handle_disc_req(self, msg):
+        logger.info(f"Handling message: {msg}")
+        if self.peer_list.get_node(msg["id"]) == None:
+            self.peer_list.add_node(msg["id"], {"ip": msg["ip"], "port": msg["port"]})
+            return_messge = {
+                "type": "DISC_RESP",
+                "ip": self.server_ip,
+                "port": self.server_port,
+                "id": str(self.server_id)
+            }
+            self.unicast.send_message(return_messge, msg["ip"], msg["port"])
 
     def register_callbacks(self):
+        self.message_handler.register_handler("DISC", self.handle_disc_req)
+        self.message_handler.register_handler("DISC_RESP", self.handle_disc_resp)
+        self.message_handler.register_handler("VOTE_REQ", self.handle_request_vote)
+        self.message_handler.register_handler("VOTE_RESP", self.handle_vote_resp)
+        self.message_handler.register_handler("APPEND_ENTRIES", self.handle_append_entries)
         self.message_handler.register_handler("CLIENT_CONNECT_REQ", self.connect_client)
 
     def connect_client(self, message):
