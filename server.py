@@ -2,7 +2,7 @@ from broadcast.broadcast import Broadcast
 from unicast.unicast import Unicast
 from message.message_handler import MessageHandler
 from node_list import NodeList
-
+from utils.common import get_ip_port
 from loguru import logger
 import uuid
 import threading
@@ -17,28 +17,19 @@ class ServerState(Enum):
     CANDIDATE = "CANDIDATE"
     LEADER = "LEADER"
 
-def get_ip_port():
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.connect(("8.8.8.8", 80))
-    return {
-        "ip" : sock.getsockname()[0],
-        "port" : sock.getsockname()[1]
-    }
 
 class Server:
     def __init__(self):
         self.server_id = uuid.uuid4()
-        res = get_ip_port()
         self.state = ServerState.FOLLOWER
-
-        self.server_ip = res["ip"]
-        self.server_port = res["port"]
+        self.server_ip, self.server_port = get_ip_port()
         self.peer_list = NodeList()
+        self.client_list = NodeList()
         logger.info(f"Server starting with id: {self.server_id}, ip: {self.server_ip}, port: {self.server_port}")
         # setup message resolver for the server
-        self.message_queue = MessageHandler(self)
+        self.message_handler = MessageHandler(self)
         self.discovery_complete = False
-
+        self.register_callbacks()
         # setup unicast communication for the server
         self.unicast = Unicast(unicast_ip= self.server_ip, unicast_port=self.server_port)
 
@@ -65,10 +56,23 @@ class Server:
         return random.uniform(0.15, 0.30)
 
 
+    def register_callbacks(self):
+        self.message_handler.register_handler("CLIENT_CONNECT_REQ", self.connect_client)
+
+    def connect_client(self, message):
+        response_message = {
+            "type": "DISCOVER_LEADER",
+            "ip": self.server_ip,
+            "port": self.server_port
+        }
+        self.client_list.add_node(message["id"], message)
+        self.unicast.send_message(response_message, message["ip"], message["port"])
+
+
     def start_server(self):
-        self.message_queue.start_message_handler()
-        self.unicast.start_unicast_listen(self.message_queue)
-        self.broadcast.start_broadcast_listen(self.message_queue)
+        self.message_handler.start_message_handler()
+        self.unicast.start_unicast_listen(self.message_handler)
+        self.broadcast.start_broadcast_listen(self.message_handler)
         broadcast_message = {
             "type": "DISC",
             "id": str(self.server_id),
@@ -101,8 +105,12 @@ class Server:
                     logger.info("Candidate timeout occurred. Starting new election")
                     self.transisiton_to_candidate()
             elif current_state == ServerState.LEADER:
-                self.send_heartbeat()
-                time.sleep(self.heartbeat_interval)
+                # Check log for previous
+                # Auction instance
+                # thread.Thread(target=self.send_heartbeat).start()
+                self.heartbeat_thread = threading.Thread(target=self.send_heartbeat, daemon=True)
+                self.heartbeat_thread.start()
+
                 continue
 
             time.sleep(self.heartbeat_interval)
@@ -195,23 +203,29 @@ class Server:
         self.check_election_won()
 
     def send_heartbeat(self):
-        peers = self.peer_list.get_all_node()
+        while True:
+            logger.info("sending heartbeats")
+            peers = self.peer_list.get_all_node()
 
-        with self.state_lock:
-            current_term = self.current_term
+            with self.state_lock:
+                if self.state != ServerState.FOLLOWER:
+                    return
+                current_term = self.current_term
 
-        for peer_id, peer_info in peers.items():
-            heartbeat_msg = {
-                "type": "APPEND_ENTRIES",
-                "term": current_term,
-                "id": str(self.server_id),
-                "ip": self.server_ip,
-                "port": self.server_port,
-                "prev_log_index": len(self.log) - 1,
-                "prev_log_term": self.log[-1]["term"] if self.log else 0,
-                "leader_commit": self.commit_index
-            }
-            self.unicast.send_message(heartbeat_msg, peer_info["ip"], peer_info["port"])
+            for peer_id, peer_info in peers.items():
+                heartbeat_msg = {
+                    "type": "APPEND_ENTRIES",
+                    "term": current_term,
+                    "id": str(self.server_id),
+                    "ip": self.server_ip,
+                    "port": self.server_port,
+                    "prev_log_index": len(self.log) - 1,
+                    "prev_log_term": self.log[-1]["term"] if self.log else 0,
+                    "leader_commit": self.commit_index
+                }
+                self.unicast.send_message(heartbeat_msg, peer_info["ip"], peer_info["port"])
+            time.sleep(0.1)
+
 
     def handle_append_entries(self, msg):
         with self.state_lock:

@@ -8,6 +8,11 @@ class MessageHandler:
         self.message_queue = queue.Queue()
         self.worker_thread = None 
         self.server = server
+        self.message_handlers = {}
+
+    def register_handler(self, message_type, handler_func):
+        logger.info(f"registering function for message type {message_type}")
+        self.message_handlers[message_type] = handler_func
 
     def add_message(self, msg):
         self.message_queue.put(msg)
@@ -21,8 +26,15 @@ class MessageHandler:
             try:
                 msg = self.message_queue.get(timeout=1.0)
                 self._handle_message(msg)
+                self._dispatch_message(msg)
             except queue.Empty:
                 continue
+    
+    def _dispatch_message(self, msg):
+        if self.message_handler.get(msg["type"], None) is not None:
+            self.message_handler.get(msg["type"])(msg)
+        else:
+            logger.info("error finding handler for message type %s", msg["type"])
 
     def _handle_message(self, msg):
         if msg["id"] != str(self.server.server_id):
@@ -46,4 +58,4 @@ class MessageHandler:
             elif msg["type"] == "VOTE_RESP":
                 self.server.handle_vote_resp(msg)
             elif msg["type"] == "APPEND_ENTRIES":
-                self.server.handle_append_entries(msg)
+                self.server.handle_append_entries(msg) 
