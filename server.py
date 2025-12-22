@@ -85,6 +85,9 @@ class Server:
         self.message_handler.register_handler("VOTE_RESP", self.handle_vote_resp)
         self.message_handler.register_handler("APPEND_ENTRIES", self.handle_append_entries)
         self.message_handler.register_handler("CLIENT_CONNECT_REQ", self.connect_client)
+        self.message_handler.register_handler(
+            "APPEND_ENTRIES_RESP", self.handle_append_entries_resp
+        )
 
     def connect_client(self, message):
         if message["id"] == str(self.server_id):
@@ -129,6 +132,7 @@ class Server:
                 if self.discovery_complete and timeout_since_heartbeat > self.election_timeout:
                     logger.info("Election timeout occurred")
                     self.transisiton_to_candidate()
+                time.sleep(self.heartbeat_interval)
             elif current_state == ServerState.CANDIDATE:
                 if timeout_since_heartbeat > self.election_timeout:
                     logger.info("Candidate timeout occurred. Starting new election")
@@ -137,12 +141,7 @@ class Server:
                 # Check log for previous
                 # Auction instance
                 # thread.Thread(target=self.send_heartbeat).start()
-                self.heartbeat_thread = threading.Thread(target=self.send_heartbeat, daemon=True)
-                self.heartbeat_thread.start()
-
-                continue
-
-            time.sleep(self.heartbeat_interval)
+               self.send_heartbeat()
 
     def transisiton_to_candidate(self):
         with self.state_lock:
@@ -241,8 +240,6 @@ class Server:
             peers = self.peer_list.get_all_node()
 
             with self.state_lock:
-                if self.state != ServerState.FOLLOWER:
-                    return
                 current_term = self.current_term
 
             for peer_id, peer_info in peers.items():
@@ -257,7 +254,7 @@ class Server:
                     "leader_commit": self.commit_index
                 }
                 self.unicast.send_message(heartbeat_msg, peer_info["ip"], peer_info["port"])
-            time.sleep(0.1)
+            time.sleep(self.heartbeat_interval)
 
 
     def handle_append_entries(self, msg):
@@ -287,6 +284,16 @@ class Server:
         }
 
         self.unicast.send_message(append_entries_response, msg["ip"], msg["port"])
+
+    def handle_append_entries_resp(self, msg):
+
+        if msg["id"] == str(self.server_id):
+            return
+        
+        with self.state_lock:
+            if msg["success"] == True and msg["term"] == self.current_term: 
+                self.election_timeout = self._get_random_election_timeout()
+                self.last_heartbeat_time = time.time()
 
 if __name__ == "__main__":
 
