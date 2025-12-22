@@ -8,11 +8,11 @@ class MessageHandler:
         self.message_queue = queue.Queue()
         self.worker_thread = None 
         self.server = server
-        self.message_handlers = {}
+        self.message_handler = {}
 
     def register_handler(self, message_type, handler_func):
         logger.info(f"registering function for message type {message_type}")
-        self.message_handlers[message_type] = handler_func
+        self.message_handler[message_type] = handler_func
 
     def add_message(self, msg):
         self.message_queue.put(msg)
@@ -25,7 +25,7 @@ class MessageHandler:
         while True:
             try:
                 msg = self.message_queue.get(timeout=1.0)
-                self._handle_message(msg)
+                # self._handle_message(msg)
                 self._dispatch_message(msg)
             except queue.Empty:
                 continue
