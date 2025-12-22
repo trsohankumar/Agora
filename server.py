@@ -56,11 +56,17 @@ class Server:
         return random.uniform(0.15, 0.30)
     
     def handle_disc_resp(self, msg):
+        
+        if msg["id"] == str(self.server_id):
+            return
+
         logger.info(f"Handling message: {msg}")
         if self.peer_list.get_node(msg["id"]) == None:
             self.peer_list.add_node(msg["id"], {"ip": msg["ip"], "port": msg["port"]})
 
     def handle_disc_req(self, msg):
+        if msg["id"] == str(self.server_id):
+            return
         logger.info(f"Handling message: {msg}")
         if self.peer_list.get_node(msg["id"]) == None:
             self.peer_list.add_node(msg["id"], {"ip": msg["ip"], "port": msg["port"]})
@@ -81,6 +87,8 @@ class Server:
         self.message_handler.register_handler("CLIENT_CONNECT_REQ", self.connect_client)
 
     def connect_client(self, message):
+        if message["id"] == str(self.server_id):
+            return
         response_message = {
             "type": "DISCOVER_LEADER",
             "ip": self.server_ip,
@@ -177,6 +185,8 @@ class Server:
                     self.match_index[peer_id] = - 1
 
     def handle_request_vote(self, msg):
+        if msg["id"] == str(self.server_id):
+            return
         with self.state_lock:
             grant_vote = False
 
@@ -213,6 +223,8 @@ class Server:
         logger.info(f"Vote {'GRANTED' if grant_vote else 'DENIED'} for {msg['id']} for term: {self.current_term}")
 
     def handle_vote_resp(self, msg):
+        if msg["id"] == str(self.server_id):
+            return
         with self.state_lock:
             if self.state != ServerState.CANDIDATE or msg["term"] != self.current_term:
                 return
@@ -249,6 +261,8 @@ class Server:
 
 
     def handle_append_entries(self, msg):
+        if msg["id"] == str(self.server_id):
+            return
         with self.state_lock:
             if msg["term"] < self.current_term:
                 resp = False
