@@ -90,6 +90,11 @@ class Server:
         )
 
     def connect_client(self, message):
+
+        with self.state_lock:
+            if self.state != ServerState.LEADER:
+                return
+
         if message["id"] == str(self.server_id):
             return
         response_message = {
@@ -98,6 +103,7 @@ class Server:
             "ip": self.server_ip,
             "port": self.server_port
         }
+        logger.info(f"Received msg from client: {message['id']}")
         self.client_list.add_node(message["id"], message)
         self.unicast.send_message(response_message, message["ip"], message["port"])
 
