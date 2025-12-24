@@ -59,13 +59,18 @@ class Server:
         return random.uniform(0.15, 0.30)
     
     def handle_disc_resp(self, msg):
-        
+
         if msg["id"] == str(self.server_id):
             return
 
         logger.info(f"Handling message: {msg}")
         if self.peer_list.get_node(msg["id"]) == None:
             self.peer_list.add_node(msg["id"], {"ip": msg["ip"], "port": msg["port"]})
+            # Initialize next_index and match_index for new peer
+            with self.state_lock:
+                if self.state == ServerState.LEADER:
+                    self.next_index[msg["id"]] = len(self.log)
+                    self.match_index[msg["id"]] = -1
 
     def handle_disc_req(self, msg):
         if msg["id"] == str(self.server_id):
@@ -73,6 +78,11 @@ class Server:
         logger.info(f"Handling message: {msg}")
         if self.peer_list.get_node(msg["id"]) == None:
             self.peer_list.add_node(msg["id"], {"ip": msg["ip"], "port": msg["port"]})
+            # Initialize next_index and match_index for new peer
+            with self.state_lock:
+                if self.state == ServerState.LEADER:
+                    self.next_index[msg["id"]] = len(self.log)
+                    self.match_index[msg["id"]] = -1
             return_messge = {
                 "type": ServerMessageType.RES_DISC.value,
                 "ip": self.server_ip,
