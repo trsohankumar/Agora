@@ -362,11 +362,13 @@ class Server:
             index_count = defaultdict(int)
             for ind in self.match_index.values():
                 index_count[ind] += 1
-            index_count[len(self.log) - 1] += 1
+            if len(self.log) > 0:
+                index_count[len(self.log) - 1] += 1
+
             for key, val in index_count.items():
-                logger.info(f"Key: {key}, Val: {val}, Commit_index: {self.commit_index}, Term: {self.term}, Log Term: {self.log}")
-                if key > self.commit_index and val > (self.peer_list.get_len() + 1)//2 and self.log[key].term == self.term:
-                    self.commit_index = key
+                if key >= 0 and key < len(self.log):
+                    if key > self.commit_index and val > (self.peer_list.get_len() + 1)//2 and self.log[key].term == self.term:
+                        self.commit_index = key
 
 if __name__ == "__main__":
 
