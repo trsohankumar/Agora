@@ -26,3 +26,7 @@ class NodeList:
     def remove_node(self, node_id):
         with self.lock:
             return self.nodes.pop(node_id, None)
+    
+    def get_len(self):
+        with self.lock:
+            return len(self.nodes)

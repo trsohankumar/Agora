@@ -1,3 +1,5 @@
+from collections import defaultdict
+from email.policy import default
 from broadcast.broadcast import Broadcast
 from unicast.unicast import Unicast
 from message.message_handler import MessageHandler
@@ -144,6 +146,33 @@ class Server:
                 # Auction instance
                 # thread.Thread(target=self.send_heartbeat).start()
                self.send_heartbeat()
+            
+            with self.state_lock:
+                if self.commit_index > self.last_applied:
+                    # apply the logs to state machine
+                    self.last_applied+=1
+                    message =self.log[self.last_applied].command
+                    match message.get("type"):
+                        case ClientMessageType.REQ_DISC:
+                            # 
+                            self.client_list.add_node(
+                                message.get("id"),
+                                {"ip": message.get("ip"), "port": message.get("port")}
+                            )
+                            if self.state == ServerState.LEADER:
+                                self.unicast.send_message(
+                                    {
+                                        "type": ClientMessageType.RES_DISC,
+                                        "id": str(self.server_id),
+                                        "ip": self.server_ip,
+                                        "port": self.server_port
+                                    }, 
+                                    message.get("ip"),
+                                    message.get("port")
+                                )
+                        case _:
+                            logger.info("default case")
+
 
     def transisiton_to_candidate(self):
         with self.state_lock:
@@ -242,7 +271,8 @@ class Server:
             peers = self.peer_list.get_all_node()
 
             with self.state_lock:
-                for _, peer_info in peers.items():
+                for peer_id, peer_info in peers.items():
+                    # edge case to be handled
                     heartbeat_msg = {
                         "type": ServerMessageType.REQ_APPEND_ENTRIES,
                         "term": self.term,
@@ -252,7 +282,7 @@ class Server:
                         "prev_log_index": self.last_applied,
                         "prev_log_term": self.log[-1].term if self.log else 0,
                         "leader_commit": self.commit_index,
-                        "entries": self.log[self.last_applied + 1 :-1]
+                        "entries": self.log[self.next_index.get(peer_id)]
                     }
                     
                     self.unicast.send_message(heartbeat_msg, peer_info["ip"], peer_info["port"])
@@ -287,18 +317,37 @@ class Server:
                 "success": resp,
                 "id": str(self.server_id)
             }
-
+            self.election_timeout = self._get_random_election_timeout()
+            self.last_heartbeat_time = time.time()
         self.unicast.send_message(append_entries_response, msg["ip"], msg["port"])
 
-    def handle_append_entries_resp(self, msg):
 
+    def handle_append_entries_resp(self, msg):
         if msg["id"] == str(self.server_id):
             return
-        
+
         with self.state_lock:
+            if self.term < msg.get("term"):
+                self.term = msg.get("term")
+                self.state = ServerState.FOLLOWER
+                return
+            
+            if msg.get("success") == False:
+                self.next_index[msg.get("id")] -= 1
+
             if msg["success"] == True and msg["term"] == self.term: 
-                self.election_timeout = self._get_random_election_timeout()
-                self.last_heartbeat_time = time.time()
+                self.match_index[msg.get("id")] = self.next_index[msg.get("id")]
+                self.next_index[msg.get("id")] += 1
+
+            index_count = defaultdict(int)
+            for ind in self.match_index.values():
+                index_count[ind] += 1
+
+            for key, val in index_count.items():
+                if key > self.commit_index and val >= len(self.peer_list.get_len())//2 and self.log[key].term == self.term:
+                    self.commit_index = key
+
+
 
 if __name__ == "__main__":
 
