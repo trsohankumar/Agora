@@ -1,5 +1,12 @@
+import uuid
+import random
+import time
+import threading
+
+from loguru import logger
+from enum import Enum
 from collections import defaultdict
-from email.policy import default
+
 from broadcast.broadcast import Broadcast
 from unicast.unicast import Unicast
 from message.message_handler import MessageHandler
@@ -7,14 +14,6 @@ from message.message_types import ServerMessageType, ClientMessageType
 from node_list import NodeList
 from log.log_entries import LogEntries
 from utils.common import get_ip_port
-from loguru import logger
-import uuid
-import threading
-import socket
-import time
-import random
-from enum import Enum
-import random
 
 class ServerState(Enum):
     FOLLOWER = "FOLLOWER"
@@ -75,7 +74,7 @@ class Server:
         if self.peer_list.get_node(msg["id"]) == None:
             self.peer_list.add_node(msg["id"], {"ip": msg["ip"], "port": msg["port"]})
             return_messge = {
-                "type": "DISC_RESP",
+                "type": ServerMessageType.RES_DISC,
                 "ip": self.server_ip,
                 "port": self.server_port,
                 "id": str(self.server_id)
@@ -83,10 +82,10 @@ class Server:
             self.unicast.send_message(return_messge, msg["ip"], msg["port"])
 
     def register_callbacks(self):
-        self.message_handler.register_handler(ServerMessageType.REQ_APPEND_ENTRIES, self.handle_disc_req)
+        self.message_handler.register_handler(ServerMessageType.REQ_DISC, self.handle_disc_req)
         self.message_handler.register_handler(ServerMessageType.RES_DISC, self.handle_disc_resp)
         self.message_handler.register_handler(ServerMessageType.REQ_VOTE, self.handle_request_vote)
-        self.message_handler.register_handler(ServerMessageType.RES_DISC, self.handle_vote_resp)
+        self.message_handler.register_handler(ServerMessageType.RES_VOTE, self.handle_vote_resp)
         self.message_handler.register_handler(
             ServerMessageType.REQ_APPEND_ENTRIES, self.handle_append_entries
         )
@@ -135,17 +134,16 @@ class Server:
             if current_state == ServerState.FOLLOWER:
                 if self.discovery_complete and timeout_since_heartbeat > self.election_timeout:
                     logger.info("Election timeout occurred")
-                    self.transisiton_to_candidate()
+                    self.transiton_to_candidate()
                 time.sleep(self.heartbeat_interval)
             elif current_state == ServerState.CANDIDATE:
                 if timeout_since_heartbeat > self.election_timeout:
                     logger.info("Candidate timeout occurred. Starting new election")
-                    self.transisiton_to_candidate()
+                    self.transiton_to_candidate()
+                time.sleep(self.heartbeat_interval)
             elif current_state == ServerState.LEADER:
-                # Check log for previous
-                # Auction instance
-                # thread.Thread(target=self.send_heartbeat).start()
-               self.send_heartbeat()
+                self.send_heartbeat()
+                time.sleep(self.heartbeat_interval)
             
             with self.state_lock:
                 if self.commit_index > self.last_applied:
@@ -174,7 +172,7 @@ class Server:
                             logger.info("default case")
 
 
-    def transisiton_to_candidate(self):
+    def transiton_to_candidate(self):
         with self.state_lock:
             self.term += 1
             self.state = ServerState.CANDIDATE
@@ -196,7 +194,7 @@ class Server:
                 "ip": self.server_ip,
                 "port": self.server_port,
                 "last_log_index": len(self.log) - 1,
-                "last_log_term": self.log[-1]["term"] if self.log else 0
+                "last_log_term": self.log[-1].term if len(self.log) > 0 else 0
             }
             self.unicast.send_message(vote_request, peer_info["ip"], peer_info["port"])
 
@@ -206,7 +204,7 @@ class Server:
                 return
             
             total_nodes = len(self.peer_list.get_all_node()) + 1
-            if len(self.votes_received) >= (total_nodes / 2):
+            if len(self.votes_received) > (total_nodes // 2):
                 logger.info(f"Server: {self.server_id} has won the election for term: {self.term}")
                 self.state = ServerState.LEADER
                 peers = self.peer_list.get_all_node()
@@ -227,7 +225,7 @@ class Server:
 
             if msg["term"] == self.term:
                 if self.voted_for is None or self.voted_for == msg["id"]:
-                    server_last_log_term = self.log[-1]["term"] if self.log else 0
+                    server_last_log_term = self.log[-1].term if len(self.log) > 0 else 0
                     server_last_log_index = len(self.log) - 1 
 
                     vote_possible = (
@@ -267,50 +265,52 @@ class Server:
 
     def send_heartbeat(self):
         logger.info("sending heartbeats")
-        while True:
-            peers = self.peer_list.get_all_node()
+        peers = self.peer_list.get_all_node()
 
-            with self.state_lock:
-                for peer_id, peer_info in peers.items():
-                    # edge case to be handled
-                    heartbeat_msg = {
-                        "type": ServerMessageType.REQ_APPEND_ENTRIES,
-                        "term": self.term,
-                        "id": str(self.server_id),
-                        "ip": self.server_ip,
-                        "port": self.server_port,
-                        "prev_log_index": self.last_applied,
-                        "prev_log_term": self.log[-1].term if self.log else 0,
-                        "leader_commit": self.commit_index,
-                        "entries": self.log[self.next_index.get(peer_id)]
-                    }
-                    
-                    self.unicast.send_message(heartbeat_msg, peer_info["ip"], peer_info["port"])
-            time.sleep(self.heartbeat_interval)
-
+        with self.state_lock:
+            for peer_id, peer_info in peers.items():
+                # edge case to be handled
+                prev_log_idx = self.next_index[peer_id] - 1
+                heartbeat_msg = {
+                    "type": ServerMessageType.REQ_APPEND_ENTRIES,
+                    "term": self.term,
+                    "id": str(self.server_id),
+                    "ip": self.server_ip,
+                    "port": self.server_port,
+                    "prev_log_index": prev_log_idx,
+                    "prev_log_term": self.log[prev_log_idx].term if prev_log_idx >= 0 else 0,
+                    "leader_commit": self.commit_index,
+                    "entries": self.log[self.next_index.get(peer_id):]
+                }
+                self.unicast.send_message(heartbeat_msg, peer_info["ip"], peer_info["port"])
 
     def handle_append_entries(self, msg):
         if msg["id"] == str(self.server_id):
             return
         
         with self.state_lock:
-            if self.state != ServerState.FOLLOWER:
-                return
-            
-            if  self.term < msg["term"]:
+                
+            if msg["term"] > self.term:
+                self.term = msg["term"]
+                self.state = ServerState.FOLLOWER
+                self.voted_for = None
+
+            if msg["term"] < self.term:
                 resp = False
-            elif msg["prev_log_term"] != self.log[msg["prev_log_index"]].term:
+            elif msg["prev_log_index"] >= len(self.log):
+                resp = False
+            elif msg["prev_log_index"] >= 0 and msg["prev_log_term"] != self.log[msg["prev_log_index"]].term:
                 resp = False
             else:
                 try:
-                    del self.log[msg["prev_log_index"] + 1, -1]
+                    del self.log[msg["prev_log_index"] + 1:]
                 except IndexError:
                     pass
                 self.log.extend(msg["entries"])
 
                 if msg["leader_commit"] > self.commit_index:
                     self.commit_index = min(msg["leader_commit"], len(self.log) - 1)
-
+                resp = True
             append_entries_response = {
                 "type": ServerMessageType.RES_APPEND_ENTRIES,
                 "term": self.term,
@@ -342,9 +342,9 @@ class Server:
             index_count = defaultdict(int)
             for ind in self.match_index.values():
                 index_count[ind] += 1
-
+            index_count[len(self.log) - 1] += 1
             for key, val in index_count.items():
-                if key > self.commit_index and val >= len(self.peer_list.get_len())//2 and self.log[key].term == self.term:
+                if key > self.commit_index and val > (self.peer_list.get_len() + 1)//2 and self.log[key].term == self.term:
                     self.commit_index = key
 
 

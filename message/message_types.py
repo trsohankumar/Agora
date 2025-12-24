@@ -1,6 +1,6 @@
-from enum import enum
+from enum import Enum
 
-class ClientMessageType(enum):
+class ClientMessageType(Enum):
     REQ_DISC = 1, 
     RES_DISC = 2, 
     REQ_START_AUCTION = 3,
@@ -12,7 +12,7 @@ class ClientMessageType(enum):
     REQ_MAKE_BID = 9,
     RES_MAKE_BID = 10
 
-class ServerMessageType(enum):
+class ServerMessageType(Enum):
     REQ_DISC = 100,
     RES_DISC = 101,
     REQ_VOTE = 102,
