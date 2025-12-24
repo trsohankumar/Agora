@@ -17,7 +17,6 @@ class Client:
     def __init__(self):
         self.client_id = uuid.uuid4()
         self.client_ip, self.client_port = get_ip_port()
-        self.client_port = 4001
         logger.info(
             f"starting client {self.client_id} @ {self.client_ip} {self.client_port}"
         )
@@ -62,8 +61,7 @@ class Client:
             if self.client_state == ClientState.DISCONNECTED:
                 self.search_for_leader()
             elif self.client_state == ClientState.CONNECTED:
-                logger.info("client connected to leader")
-
+                continue
 
 def main():
     # 1. broadcasts itself to the network
