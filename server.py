@@ -146,13 +146,13 @@ class Server:
                 time.sleep(self.heartbeat_interval)
             
             with self.state_lock:
-                if self.commit_index > self.last_applied:
+                if self.commit_index > self.last_applied and self.last_applied + 1 < len(self.log):
                     # apply the logs to state machine
                     self.last_applied+=1
                     message =self.log[self.last_applied].command
                     match message.get("type"):
                         case ClientMessageType.REQ_DISC:
-                            # 
+                            #
                             self.client_list.add_node(
                                 message.get("id"),
                                 {"ip": message.get("ip"), "port": message.get("port")}
