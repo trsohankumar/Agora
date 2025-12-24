@@ -34,4 +34,4 @@ class MessageHandler:
         if self.message_handler.get(msg["type"], None) is not None:
             self.message_handler.get(msg["type"])(msg)
         else:
-            logger.info("error finding handler for message type %s", msg["type"]) 
+            logger.info(f"error finding handler for message type {msg['type']}") 

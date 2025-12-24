@@ -1,21 +1,21 @@
 from enum import Enum
 
 class ClientMessageType(Enum):
-    REQ_DISC = 1, 
-    RES_DISC = 2, 
-    REQ_START_AUCTION = 3,
-    RES_START_AUCTION = 4,
-    REQ_JOIN_AUCTION = 5,
-    RES_JOIN_AUCTION = 6,
-    REQ_HEART_BEAT = 7,
-    RES_HEART_BEAT = 8,
-    REQ_MAKE_BID = 9,
+    REQ_DISC = 1
+    RES_DISC = 2
+    REQ_START_AUCTION = 3
+    RES_START_AUCTION = 4
+    REQ_JOIN_AUCTION = 5
+    RES_JOIN_AUCTION = 6
+    REQ_HEART_BEAT = 7
+    RES_HEART_BEAT = 8
+    REQ_MAKE_BID = 9
     RES_MAKE_BID = 10
 
 class ServerMessageType(Enum):
-    REQ_DISC = 100,
-    RES_DISC = 101,
-    REQ_VOTE = 102,
-    RES_VOTE = 103,
-    REQ_APPEND_ENTRIES = 104,
-    RES_APPEND_ENTRIES = 105,
+    REQ_DISC = 100
+    RES_DISC = 101
+    REQ_VOTE = 102
+    RES_VOTE = 103
+    REQ_APPEND_ENTRIES = 104
+    RES_APPEND_ENTRIES = 105

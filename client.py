@@ -30,7 +30,7 @@ class Client:
         self.state_lock = threading.Lock()
 
     def register_callbacks(self):
-        self.message_handler.register_handler("DISCOVER_LEADER", self.discover_leader)
+        self.message_handler.register_handler(ClientMessageType.RES_DISC.value, self.discover_leader)
 
     def discover_leader(self, message):
         with self.state_lock:
@@ -45,7 +45,7 @@ class Client:
                     break
             logger.info("searching for leader")
             client_message = {
-                "type": ClientMessageType.REQ_JOIN,
+                "type": ClientMessageType.REQ_DISC.value,
                 "id": str(self.client_id),
                 "ip": self.client_ip,
                 "port": self.client_port

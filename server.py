@@ -74,7 +74,7 @@ class Server:
         if self.peer_list.get_node(msg["id"]) == None:
             self.peer_list.add_node(msg["id"], {"ip": msg["ip"], "port": msg["port"]})
             return_messge = {
-                "type": ServerMessageType.RES_DISC,
+                "type": ServerMessageType.RES_DISC.value,
                 "ip": self.server_ip,
                 "port": self.server_port,
                 "id": str(self.server_id)
@@ -82,16 +82,16 @@ class Server:
             self.unicast.send_message(return_messge, msg["ip"], msg["port"])
 
     def register_callbacks(self):
-        self.message_handler.register_handler(ServerMessageType.REQ_DISC, self.handle_disc_req)
-        self.message_handler.register_handler(ServerMessageType.RES_DISC, self.handle_disc_resp)
-        self.message_handler.register_handler(ServerMessageType.REQ_VOTE, self.handle_request_vote)
-        self.message_handler.register_handler(ServerMessageType.RES_VOTE, self.handle_vote_resp)
+        self.message_handler.register_handler(ServerMessageType.REQ_DISC.value, self.handle_disc_req)
+        self.message_handler.register_handler(ServerMessageType.RES_DISC.value, self.handle_disc_resp)
+        self.message_handler.register_handler(ServerMessageType.REQ_VOTE.value, self.handle_request_vote)
+        self.message_handler.register_handler(ServerMessageType.RES_VOTE.value, self.handle_vote_resp)
         self.message_handler.register_handler(
-            ServerMessageType.REQ_APPEND_ENTRIES, self.handle_append_entries
+            ServerMessageType.REQ_APPEND_ENTRIES.value, self.handle_append_entries
         )
-        self.message_handler.register_handler(ClientMessageType.REQ_DISC, self.connect_client)
+        self.message_handler.register_handler(ClientMessageType.REQ_DISC.value, self.connect_client)
         self.message_handler.register_handler(
-            ServerMessageType.RES_APPEND_ENTRIES, self.handle_append_entries_resp
+            ServerMessageType.RES_APPEND_ENTRIES.value, self.handle_append_entries_resp
         )
 
     def connect_client(self, message):
@@ -109,7 +109,7 @@ class Server:
         self.unicast.start_unicast_listen(self.message_handler)
         self.broadcast.start_broadcast_listen(self.message_handler)
         broadcast_message = {
-            "type": ServerMessageType.REQ_DISC,
+            "type": ServerMessageType.REQ_DISC.value,
             "id": str(self.server_id),
             "ip": self.server_ip,
             "port": self.server_port
@@ -160,11 +160,11 @@ class Server:
                             if self.state == ServerState.LEADER:
                                 self.unicast.send_message(
                                     {
-                                        "type": ClientMessageType.RES_DISC,
+                                        "type": ClientMessageType.RES_DISC.value,
                                         "id": str(self.server_id),
                                         "ip": self.server_ip,
                                         "port": self.server_port
-                                    }, 
+                                    },
                                     message.get("ip"),
                                     message.get("port")
                                 )
@@ -188,7 +188,7 @@ class Server:
         peers = self.peer_list.get_all_node()
         for peer_id, peer_info in peers.items():
             vote_request = {
-                "type": ServerMessageType.REQ_VOTE,
+                "type": ServerMessageType.REQ_VOTE.value,
                 "term": self.term,
                 "id": str(self.server_id),
                 "ip": self.server_ip,
@@ -240,7 +240,7 @@ class Server:
 
             term = self.term
         vote_response = {
-            "type" : ServerMessageType.RES_VOTE,
+            "type" : ServerMessageType.RES_VOTE.value,
             "id": str(self.server_id),
             "term" : term,
             "vote_granted": grant_vote,
@@ -272,7 +272,7 @@ class Server:
                 # edge case to be handled
                 prev_log_idx = self.next_index[peer_id] - 1
                 heartbeat_msg = {
-                    "type": ServerMessageType.REQ_APPEND_ENTRIES,
+                    "type": ServerMessageType.REQ_APPEND_ENTRIES.value,
                     "term": self.term,
                     "id": str(self.server_id),
                     "ip": self.server_ip,
@@ -312,7 +312,7 @@ class Server:
                     self.commit_index = min(msg["leader_commit"], len(self.log) - 1)
                 resp = True
             append_entries_response = {
-                "type": ServerMessageType.RES_APPEND_ENTRIES,
+                "type": ServerMessageType.RES_APPEND_ENTRIES.value,
                 "term": self.term,
                 "success": resp,
                 "id": str(self.server_id)
