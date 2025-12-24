@@ -1,7 +1,9 @@
 from broadcast.broadcast import Broadcast
 from unicast.unicast import Unicast
 from message.message_handler import MessageHandler
+from message.message_types import ServerMessageType, ClientMessageType
 from node_list import NodeList
+from log.log_entries import LogEntries
 from utils.common import get_ip_port
 from loguru import logger
 import uuid
@@ -36,12 +38,12 @@ class Server:
         # setup broadcast communication for the server
         self.broadcast = Broadcast(self.server_ip)
 
-        self.current_term = 0
+        self.term = 0
         self.voted_for = None
         self.log = []
 
         self.commit_index = 0
-        self.last_applied = 0
+        self.last_applied = -1
 
         self.next_index = {}
         self.match_index = {}
@@ -79,41 +81,34 @@ class Server:
             self.unicast.send_message(return_messge, msg["ip"], msg["port"])
 
     def register_callbacks(self):
-        self.message_handler.register_handler("DISC", self.handle_disc_req)
-        self.message_handler.register_handler("DISC_RESP", self.handle_disc_resp)
-        self.message_handler.register_handler("VOTE_REQ", self.handle_request_vote)
-        self.message_handler.register_handler("VOTE_RESP", self.handle_vote_resp)
-        self.message_handler.register_handler("APPEND_ENTRIES", self.handle_append_entries)
-        self.message_handler.register_handler("CLIENT_CONNECT_REQ", self.connect_client)
+        self.message_handler.register_handler(ServerMessageType.REQ_APPEND_ENTRIES, self.handle_disc_req)
+        self.message_handler.register_handler(ServerMessageType.RES_DISC, self.handle_disc_resp)
+        self.message_handler.register_handler(ServerMessageType.REQ_VOTE, self.handle_request_vote)
+        self.message_handler.register_handler(ServerMessageType.RES_DISC, self.handle_vote_resp)
         self.message_handler.register_handler(
-            "APPEND_ENTRIES_RESP", self.handle_append_entries_resp
+            ServerMessageType.REQ_APPEND_ENTRIES, self.handle_append_entries
+        )
+        self.message_handler.register_handler(ClientMessageType.REQ_DISC, self.connect_client)
+        self.message_handler.register_handler(
+            ServerMessageType.RES_APPEND_ENTRIES, self.handle_append_entries_resp
         )
 
     def connect_client(self, message):
+        if message["id"] == str(self.server_id):
+            return
 
         with self.state_lock:
             if self.state != ServerState.LEADER:
                 return
-
-        if message["id"] == str(self.server_id):
-            return
-        response_message = {
-            "type": "DISCOVER_LEADER",
-            "id": str(self.server_id),
-            "ip": self.server_ip,
-            "port": self.server_port
-        }
-        logger.info(f"Received msg from client: {message['id']}")
-        self.client_list.add_node(message["id"], message)
-        self.unicast.send_message(response_message, message["ip"], message["port"])
-
+            self.log.append(LogEntries(self.term, message))
+ 
 
     def start_server(self):
         self.message_handler.start_message_handler()
         self.unicast.start_unicast_listen(self.message_handler)
         self.broadcast.start_broadcast_listen(self.message_handler)
         broadcast_message = {
-            "type": "DISC",
+            "type": ServerMessageType.REQ_DISC,
             "id": str(self.server_id),
             "ip": self.server_ip,
             "port": self.server_port
@@ -152,7 +147,7 @@ class Server:
 
     def transisiton_to_candidate(self):
         with self.state_lock:
-            self.current_term += 1
+            self.term += 1
             self.state = ServerState.CANDIDATE
             self.voted_for = str(self.server_id)
             self.votes_received =  {str(self.server_id)}
@@ -166,8 +161,8 @@ class Server:
         peers = self.peer_list.get_all_node()
         for peer_id, peer_info in peers.items():
             vote_request = {
-                "type": "VOTE_REQ",
-                "term": self.current_term,
+                "type": ServerMessageType.REQ_VOTE,
+                "term": self.term,
                 "id": str(self.server_id),
                 "ip": self.server_ip,
                 "port": self.server_port,
@@ -183,7 +178,7 @@ class Server:
             
             total_nodes = len(self.peer_list.get_all_node()) + 1
             if len(self.votes_received) >= (total_nodes / 2):
-                logger.info(f"Server: {self.server_id} has won the election for term: {self.current_term}")
+                logger.info(f"Server: {self.server_id} has won the election for term: {self.term}")
                 self.state = ServerState.LEADER
                 peers = self.peer_list.get_all_node()
                 for peer_id in peers.keys():
@@ -196,12 +191,12 @@ class Server:
         with self.state_lock:
             grant_vote = False
 
-            if msg["term"] > self.current_term:
-                self.current_term = msg["term"]
+            if msg["term"] > self.term:
+                self.term = msg["term"]
                 self.state = ServerState.FOLLOWER
                 self.voted_for = None
 
-            if msg["term"] == self.current_term:
+            if msg["term"] == self.term:
                 if self.voted_for is None or self.voted_for == msg["id"]:
                     server_last_log_term = self.log[-1]["term"] if self.log else 0
                     server_last_log_index = len(self.log) - 1 
@@ -216,23 +211,23 @@ class Server:
                         self.voted_for = msg["id"]
                         self.last_heartbeat_time = time.time()
 
-            current_term = self.current_term
+            term = self.term
         vote_response = {
-            "type" : "VOTE_RESP",
+            "type" : ServerMessageType.RES_VOTE,
             "id": str(self.server_id),
-            "term" : current_term,
+            "term" : term,
             "vote_granted": grant_vote,
             "voter_id": str(self.server_id)
         }
 
         self.unicast.send_message(vote_response, msg["ip"], msg["port"])
-        logger.info(f"Vote {'GRANTED' if grant_vote else 'DENIED'} for {msg['id']} for term: {self.current_term}")
+        logger.info(f"Vote {'GRANTED' if grant_vote else 'DENIED'} for {msg['id']} for term: {self.term}")
 
     def handle_vote_resp(self, msg):
         if msg["id"] == str(self.server_id):
             return
         with self.state_lock:
-            if self.state != ServerState.CANDIDATE or msg["term"] != self.current_term:
+            if self.state != ServerState.CANDIDATE or msg["term"] != self.term:
                 return
             
             if msg["vote_granted"]:
@@ -247,48 +242,51 @@ class Server:
             peers = self.peer_list.get_all_node()
 
             with self.state_lock:
-                current_term = self.current_term
-
-            for peer_id, peer_info in peers.items():
-                heartbeat_msg = {
-                    "type": "APPEND_ENTRIES",
-                    "term": current_term,
-                    "id": str(self.server_id),
-                    "ip": self.server_ip,
-                    "port": self.server_port,
-                    "prev_log_index": len(self.log) - 1,
-                    "prev_log_term": self.log[-1]["term"] if self.log else 0,
-                    "leader_commit": self.commit_index
-                }
-                self.unicast.send_message(heartbeat_msg, peer_info["ip"], peer_info["port"])
+                for _, peer_info in peers.items():
+                    heartbeat_msg = {
+                        "type": ServerMessageType.REQ_APPEND_ENTRIES,
+                        "term": self.term,
+                        "id": str(self.server_id),
+                        "ip": self.server_ip,
+                        "port": self.server_port,
+                        "prev_log_index": self.last_applied,
+                        "prev_log_term": self.log[-1].term if self.log else 0,
+                        "leader_commit": self.commit_index,
+                        "entries": self.log[self.last_applied + 1 :-1]
+                    }
+                    
+                    self.unicast.send_message(heartbeat_msg, peer_info["ip"], peer_info["port"])
             time.sleep(self.heartbeat_interval)
 
 
     def handle_append_entries(self, msg):
         if msg["id"] == str(self.server_id):
             return
+        
         with self.state_lock:
-            if msg["term"] < self.current_term:
+            if self.state != ServerState.FOLLOWER:
+                return
+            
+            if  self.term < msg["term"]:
                 resp = False
-                current_term = self.current_term
+            elif msg["prev_log_term"] != self.log[msg["prev_log_index"]].term:
+                resp = False
             else:
-                if msg["term"] > self.current_term:
-                    self.current_term = msg["term"]
-                    self.voted_for = None
+                try:
+                    del self.log[msg["prev_log_index"] + 1, -1]
+                except IndexError:
+                    pass
+                self.log.extend(msg["entries"])
 
-                self.state = ServerState.FOLLOWER
+                if msg["leader_commit"] > self.commit_index:
+                    self.commit_index = min(msg["leader_commit"], len(self.log) - 1)
 
-                self.last_heartbeat_time = time.time()
-
-                current_term = self.current_term
-                resp = True
-                logger.info(f"Received heartbeat from the leader: {msg['id']} for term {self.current_term}")
-        append_entries_response = {
-            "type": "APPEND_ENTRIES_RESP",
-            "term": current_term,
-            "success": resp,
-            "id": str(self.server_id)
-        }
+            append_entries_response = {
+                "type": ServerMessageType.RES_APPEND_ENTRIES,
+                "term": self.term,
+                "success": resp,
+                "id": str(self.server_id)
+            }
 
         self.unicast.send_message(append_entries_response, msg["ip"], msg["port"])
 
@@ -298,7 +296,7 @@ class Server:
             return
         
         with self.state_lock:
-            if msg["success"] == True and msg["term"] == self.current_term: 
+            if msg["success"] == True and msg["term"] == self.term: 
                 self.election_timeout = self._get_random_election_timeout()
                 self.last_heartbeat_time = time.time()
 

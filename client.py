@@ -7,6 +7,7 @@ from utils.common import get_ip_port
 from message.message_handler import MessageHandler
 from enum import Enum
 from loguru import logger
+from message.message_types import ClientMessageType
 
 class ClientState(Enum):
     DISCONNECTED = 0
@@ -44,7 +45,7 @@ class Client:
                     break
             logger.info("searching for leader")
             client_message = {
-                "type": "CLIENT_CONNECT_REQ",
+                "type": ClientMessageType.REQ_JOIN,
                 "id": str(self.client_id),
                 "ip": self.client_ip,
                 "port": self.client_port
