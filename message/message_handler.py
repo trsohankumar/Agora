@@ -4,10 +4,9 @@ import threading
 
 class MessageHandler:
 
-    def __init__(self, server):
+    def __init__(self):
         self.message_queue = queue.Queue()
         self.worker_thread = None 
-        self.server = server
         self.message_handler = {}
 
     def register_handler(self, message_type, handler_func):

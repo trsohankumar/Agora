@@ -22,7 +22,7 @@ class Client:
             f"starting client {self.client_id} @ {self.client_ip} {self.client_port}"
         )
 
-        self.message_handler = MessageHandler(self)
+        self.message_handler = MessageHandler()
         self.broadcast = Broadcast(self.client_ip)
         self.unicast = Unicast(unicast_ip= self.client_ip, unicast_port=self.client_port)
         self.client_state = ClientState.DISCONNECTED
@@ -36,7 +36,7 @@ class Client:
     def discover_leader(self, message):
         with self.state_lock:
             logger.info("leader found at %s %s", message["ip"], message["port"])
-            self.leader_server = message["leader"]
+            self.leader_server = message["id"]
             self.client_state = ClientState.CONNECTED
 
     def search_for_leader(self):
@@ -55,6 +55,7 @@ class Client:
             time.sleep(1)
 
     def start_client(self):
+        self.message_handler.start_message_handler()
         self.unicast.start_unicast_listen(self.message_handler)
 
         while True:

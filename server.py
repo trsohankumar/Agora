@@ -30,7 +30,7 @@ class Server:
         self.client_list = NodeList()
         logger.info(f"Server starting with id: {self.server_id}, ip: {self.server_ip}, port: {self.server_port}")
         # setup message resolver for the server
-        self.message_handler = MessageHandler(self)
+        self.message_handler = MessageHandler()
         self.discovery_complete = False
         self.register_callbacks()
         # setup unicast communication for the server
@@ -168,7 +168,7 @@ class Server:
                                 {"ip": message.get("ip"), "port": message.get("port")}
                             )
                             if self.state == ServerState.LEADER:
-                                logger.info(f"Sending RES_DISC to client {message.get('id')} {message.get('ip')} {message.get('port')}")
+                                logger.info(f"Sending RES_DISC to client {ClientMessageType.RES_DISC.value} {message.get('id')} {message.get('ip')} {message.get('port')}")
                                 self.unicast.send_message(
                                     {
                                         "type": ClientMessageType.RES_DISC.value,
