@@ -159,6 +159,7 @@ class Server:
                 if self.commit_index > self.last_applied and self.last_applied + 1 < len(self.log):
                     # apply the logs to state machine
                     self.last_applied+=1
+                    logger.info(f"{self.log}")
                     message =self.log[self.last_applied].command
                     match message.get("type"):
                         case ClientMessageType.REQ_DISC.value:
