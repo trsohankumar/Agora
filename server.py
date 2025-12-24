@@ -285,6 +285,9 @@ class Server:
                 if prev_log_idx >= 0 and prev_log_idx < len(self.log):
                     prev_log_term = self.log[prev_log_idx].term
 
+                # Convert LogEntries to dicts for JSON serialization
+                entries_to_send = [entry.to_dict() for entry in self.log[self.next_index.get(peer_id):]]
+
                 heartbeat_msg = {
                     "type": ServerMessageType.REQ_APPEND_ENTRIES.value,
                     "term": self.term,
@@ -294,7 +297,7 @@ class Server:
                     "prev_log_index": prev_log_idx,
                     "prev_log_term": prev_log_term,
                     "leader_commit": self.commit_index,
-                    "entries": self.log[self.next_index.get(peer_id):]
+                    "entries": entries_to_send
                 }
                 self.unicast.send_message(heartbeat_msg, peer_info["ip"], peer_info["port"])
 
@@ -320,7 +323,9 @@ class Server:
                     del self.log[msg["prev_log_index"] + 1:]
                 except IndexError:
                     pass
-                self.log.extend(msg["entries"])
+                # Convert dict entries back to LogEntries objects
+                for entry_dict in msg["entries"]:
+                    self.log.append(LogEntries.from_dict(entry_dict))
 
                 if msg["leader_commit"] > self.commit_index:
                     self.commit_index = min(msg["leader_commit"], len(self.log) - 1)
