@@ -17,6 +17,7 @@ class Client:
     def __init__(self):
         self.client_id = uuid.uuid4()
         self.client_ip, self.client_port = get_ip_port()
+        self.client_port = 4001
         logger.info(
             f"starting client {self.client_id} @ {self.client_ip} {self.client_port}"
         )

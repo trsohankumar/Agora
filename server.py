@@ -161,13 +161,14 @@ class Server:
                     self.last_applied+=1
                     message =self.log[self.last_applied].command
                     match message.get("type"):
-                        case ClientMessageType.REQ_DISC:
+                        case ClientMessageType.REQ_DISC.value:
                             #
                             self.client_list.add_node(
                                 message.get("id"),
                                 {"ip": message.get("ip"), "port": message.get("port")}
                             )
                             if self.state == ServerState.LEADER:
+                                logger.info(f"Sending RES_DISC to client {message.get('id')} {message.get('ip')} {message.get('port')}")
                                 self.unicast.send_message(
                                     {
                                         "type": ClientMessageType.RES_DISC.value,
@@ -274,7 +275,7 @@ class Server:
         self.check_election_won()
 
     def send_heartbeat(self):
-        logger.info("sending heartbeats")
+        # logger.info("sending heartbeats")
         peers = self.peer_list.get_all_node()
 
         with self.state_lock:
@@ -363,10 +364,9 @@ class Server:
                 index_count[ind] += 1
             index_count[len(self.log) - 1] += 1
             for key, val in index_count.items():
+                logger.info(f"Key: {key}, Val: {val}, Commit_index: {self.commit_index}, Term: {self.term}, Log Term: {self.log}")
                 if key > self.commit_index and val > (self.peer_list.get_len() + 1)//2 and self.log[key].term == self.term:
                     self.commit_index = key
-
-
 
 if __name__ == "__main__":
 
