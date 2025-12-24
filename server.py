@@ -281,6 +281,10 @@ class Server:
             for peer_id, peer_info in peers.items():
                 # edge case to be handled
                 prev_log_idx = self.next_index[peer_id] - 1
+                prev_log_term = 0
+                if prev_log_idx >= 0 and prev_log_idx < len(self.log):
+                    prev_log_term = self.log[prev_log_idx].term
+
                 heartbeat_msg = {
                     "type": ServerMessageType.REQ_APPEND_ENTRIES.value,
                     "term": self.term,
@@ -288,7 +292,7 @@ class Server:
                     "ip": self.server_ip,
                     "port": self.server_port,
                     "prev_log_index": prev_log_idx,
-                    "prev_log_term": self.log[prev_log_idx].term if prev_log_idx >= 0 else 0,
+                    "prev_log_term": prev_log_term,
                     "leader_commit": self.commit_index,
                     "entries": self.log[self.next_index.get(peer_id):]
                 }
