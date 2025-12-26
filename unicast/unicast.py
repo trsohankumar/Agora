@@ -23,10 +23,10 @@ class Unicast:
 
     def _listen_message(self, msg_handler: MessageHandler):
         # will listen for unicast message and when a message is received will add to the messge queue
-        unicast_listen_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)        
+        unicast_listen_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         unicast_listen_socket.bind(('', self.unicast_port))
 
         while True:
-            data, addr = unicast_listen_socket.recvfrom(1024)
+            data, addr = unicast_listen_socket.recvfrom(65535)
             message = json.loads(data.decode())
             msg_handler.add_message(message)

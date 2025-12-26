@@ -50,13 +50,14 @@ class Server:
         self.match_index = {}
         
         self.state_lock = threading.Lock()
-        self.monitor_client_list_thread = threading.Timer(interval=0.06, function=self.remove_timeout_client_from_list)
+        self.heartbeat_interval = 0.05
+        self.client_heartbeat_timeout = 0.15
+        self.monitor_client_list_thread = threading.Thread(target=self.remove_timeout_client_from_list, daemon=True)
         self.monitor_client_list_thread.start()
 
         self.election_timeout = self._get_random_election_timeout()
         self.last_heartbeat_time = time.time()
         self.votes_received = set()
-        self.heartbeat_interval = 0.05
     
     def _get_random_election_timeout(self):
         return random.uniform(0.15, 0.30)
@@ -106,7 +107,7 @@ class Server:
         self.message_handler.register_handler(
             ServerMessageType.RES_APPEND_ENTRIES.value, self.handle_append_entries_resp
         )
-        self.message_handler.register_handler(ClientMessageType.REQ_HEART_BEAT, self.handle_client_heartbeat_req)
+        self.message_handler.register_handler(ClientMessageType.REQ_HEART_BEAT.value, self.handle_client_heartbeat_req)
 
     def connect_client(self, message):
         if message["id"] == str(self.server_id):
@@ -118,20 +119,22 @@ class Server:
             self.log.append(LogEntries(self.term, message))
  
     def remove_timeout_client_from_list(self):
-        with self.state_lock:
-            if self.state != ServerState.LEADER:
-                return
-            client_list = self.client_list.get_all_node()
+        while True:
+            time.sleep(self.client_heartbeat_timeout)
+            with self.state_lock:
+                if self.state != ServerState.LEADER:
+                    continue
+                client_list = self.client_list.get_all_node()
 
-        for client_id, client_info in client_list.items():
-            if time.time() - client_info.get("last_heartbeat") > self.heartbeat_interval:
-                with self.state_lock:
-                    self.log.append({
-                        "type": ClientMessageType.REQ_REMOVE_CLIENT,
-                        "ip": client_info.get("ip"),
-                        "id": client_id,
-                        "port": client_info.get("port")
-                    })
+            for client_id, client_info in client_list.items():
+                if time.time() - client_info.get("last_heartbeat") > self.client_heartbeat_timeout:
+                    with self.state_lock:
+                        self.log.append(LogEntries(self.term, {
+                            "type": ClientMessageType.REQ_REMOVE_CLIENT.value,
+                            "ip": client_info.get("ip"),
+                            "id": client_id,
+                            "port": client_info.get("port")
+                        }))
                 
     
     def handle_client_heartbeat_req(self, message):
@@ -142,8 +145,11 @@ class Server:
         :param message: Description
         """
         with self.state_lock:
+            if self.state != ServerState.LEADER:
+                return
+
             client = self.client_list.get_node(message.get('id'))
-            if client is not None and (time.time() - client.get("last_heartbeat") < self.heartbeat_interval):
+            if client is not None:
                 self.client_list.add_node(message.get('id'), {
                     "ip": message.get("ip"),
                     "port": message.get("port"),
@@ -152,7 +158,7 @@ class Server:
 
                 resp_message = {
                     "type": ClientMessageType.RES_HEART_BEAT.value,
-                    "id": self.server_id,
+                    "id": str(self.server_id),
                     "ip": self.server_ip,
                     "port": self.server_port
                 }
