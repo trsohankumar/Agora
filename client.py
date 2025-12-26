@@ -32,10 +32,10 @@ class Client:
         self.state_lock = threading.Lock()
 
         self.heartbeat_interval = 0.05
-        self.heartbeat_timeout = 0.1
+        self.heartbeat_timeout = 2.0
         self.last_heartbeat_time = time.time()
 
-        self.req_heartbeat_thread = threading.Timer(interval=self.heartbeat_interval, function=self.send_heartbeat)
+        self.req_heartbeat_thread = threading.Thread(target=self.send_heartbeat, daemon=True)
         self.req_heartbeat_thread.start()
 
     def register_callbacks(self):
@@ -50,13 +50,11 @@ class Client:
                 "ip": message["ip"],
                 "port": message["port"]
             }
+
             self.client_state = ClientState.CONNECTED
 
     def search_for_leader(self):
-        while True:
             with self.state_lock:
-                if self.leader_server is not None: 
-                    break
                 logger.info("searching for leader")
                 client_message = {
                     "type": ClientMessageType.REQ_DISC.value,
@@ -73,7 +71,8 @@ class Client:
         while True:
             with self.state_lock:
                 time_since_heartbeat = time.time() - self.last_heartbeat_time
-                if time_since_heartbeat > self.heartbeat_timeout:
+                if self.client_state == ClientState.CONNECTED and time_since_heartbeat > self.heartbeat_timeout:
+                    print(f"here {time_since_heartbeat}, {self.heartbeat_timeout}")
                     self.client_state = ClientState.DISCONNECTED
                     self.leader_server = None
                 current_state = self.client_state
@@ -84,21 +83,23 @@ class Client:
                 continue
 
     def send_heartbeat(self):
-        with self.state_lock:
-            if ClientState == ClientState.CONNECTED:
-                msg = {
-                    "type": ClientMessageType.REQ_HEART_BEAT.value,
-                    "id": self.client_id,
-                    "ip": self.client_ip,
-                    "port": self.client_port
-                }
-                self.unicast.send_message(msg, ip=self.leader_server.get("ip"), port=self.leader_server.get("port")) 
+        while True:
+            with self.state_lock:
+                if self.client_state == ClientState.CONNECTED:
+                    msg = {
+                        "type": ClientMessageType.REQ_HEART_BEAT.value,
+                        "id": str(self.client_id),
+                        "ip": self.client_ip,
+                        "port": self.client_port
+                    }
+                    self.unicast.send_message(msg, ip=self.leader_server.get("ip"), port=self.leader_server.get("port"))
+            time.sleep(self.heartbeat_interval)
                 
     def recv_heartbeats_resp(self, message):
         with self.state_lock:
             if self.leader_server.get("id") != message.get('id'):
                 self.leader_server = {
-                    "id": message.get('ip'),
+                    "id": message.get('id'),
                     "ip": message.get('ip'),
                     "port": message.get('port')
                 } 

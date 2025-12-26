@@ -124,7 +124,7 @@ class Server:
             client_list = self.client_list.get_all_node()
 
         for client_id, client_info in client_list.items():
-            if time.time() - client_info.get("last_heartbeat") < self.heartbeat_interval:
+            if time.time() - client_info.get("last_heartbeat") > self.heartbeat_interval:
                 with self.state_lock:
                     self.log.append({
                         "type": ClientMessageType.REQ_REMOVE_CLIENT,
