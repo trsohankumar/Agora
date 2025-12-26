@@ -124,7 +124,7 @@ class Server:
             client_list = self.client_list.get_all_node()
 
         for client_id, client_info in client_list.items():
-            if time.time() - client_info.get("last_heartbeat")) < self.heartbeat_interval:
+            if time.time() - client_info.get("last_heartbeat") < self.heartbeat_interval:
                 with self.state_lock:
                     self.log.append({
                         "type": ClientMessageType.REQ_REMOVE_CLIENT,
@@ -143,15 +143,15 @@ class Server:
         """
         with self.state_lock:
             client = self.client_list.get_node(message.get('id'))
-            if client is not None and (time.time() - client.get("last_heartbeat")) < self.heartbeat_interval:
+            if client is not None and (time.time() - client.get("last_heartbeat") < self.heartbeat_interval):
                 self.client_list.add_node(message.get('id'), {
                     "ip": message.get("ip"),
                     "port": message.get("port"),
-                    "list_heartbeat": time.time()
+                    "last_heartbeat": time.time()
                 })
 
                 resp_message = {
-                    "type": ClientMessageType.RES_HEART_BEAT,
+                    "type": ClientMessageType.RES_HEART_BEAT.value,
                     "id": self.server_id,
                     "ip": self.server_ip,
                     "port": self.server_port
@@ -211,8 +211,12 @@ class Server:
                             #
                             self.client_list.add_node(
                                 message.get("id"),
-                                {"ip": message.get("ip"), "port": message.get("port")}
+                                {"ip": message.get("ip"), 
+                                 "port": message.get("port"),
+                                 "last_heartbeat": time.time()
+                                 }
                             )
+
                             if self.state == ServerState.LEADER:
                                 logger.info(f"Sending RES_DISC to client {ClientMessageType.RES_DISC.value} {message.get('id')} {message.get('ip')} {message.get('port')}")
                                 self.unicast.send_message(

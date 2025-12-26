@@ -29,13 +29,14 @@ class Client:
         self.leader_server = None
         self.register_callbacks()
 
-        self.req_heartbeat_thread = threading.Timer(interval=self.heartbeat_interval, function=self.send_heartbeat)
-        self.req_heartbeat_thread.start()
         self.state_lock = threading.Lock()
 
         self.heartbeat_interval = 0.05
         self.heartbeat_timeout = 0.1
         self.last_heartbeat_time = time.time()
+
+        self.req_heartbeat_thread = threading.Timer(interval=self.heartbeat_interval, function=self.send_heartbeat)
+        self.req_heartbeat_thread.start()
 
     def register_callbacks(self):
         self.message_handler.register_handler(ClientMessageType.RES_DISC.value, self.discover_leader)
