@@ -1,3 +1,4 @@
+from typing import Any
 import uuid
 import threading
 import time
@@ -27,15 +28,27 @@ class Client:
         self.client_state = ClientState.DISCONNECTED
         self.leader_server = None
         self.register_callbacks()
+
+        self.req_heartbeat_thread = threading.Timer(interval=self.heartbeat_interval, function=self.send_heartbeat)
+        self.req_heartbeat_thread.start()
         self.state_lock = threading.Lock()
+
+        self.heartbeat_interval = 0.05
+        self.heartbeat_timeout = 0.1
+        self.last_heartbeat_time = time.time()
 
     def register_callbacks(self):
         self.message_handler.register_handler(ClientMessageType.RES_DISC.value, self.discover_leader)
+        self.message_handler.register_handler(ClientMessageType.RES_HEART_BEAT.value, self.recv_heartbeats_resp)
 
     def discover_leader(self, message):
         with self.state_lock:
             logger.info("leader found at %s %s", message["ip"], message["port"])
-            self.leader_server = message["id"]
+            self.leader_server = {
+                "id": message["id"],
+                "ip": message["ip"],
+                "port": message["port"]
+            }
             self.client_state = ClientState.CONNECTED
 
     def search_for_leader(self):
@@ -43,25 +56,53 @@ class Client:
             with self.state_lock:
                 if self.leader_server is not None: 
                     break
-            logger.info("searching for leader")
-            client_message = {
-                "type": ClientMessageType.REQ_DISC.value,
-                "id": str(self.client_id),
-                "ip": self.client_ip,
-                "port": self.client_port
-            }
+                logger.info("searching for leader")
+                client_message = {
+                    "type": ClientMessageType.REQ_DISC.value,
+                    "id": str(self.client_id),
+                    "ip": self.client_ip,
+                    "port": self.client_port
+                }
             self.broadcast.send_broadcast(client_message)
             time.sleep(1)
 
     def start_client(self):
         self.message_handler.start_message_handler()
         self.unicast.start_unicast_listen(self.message_handler)
-
         while True:
-            if self.client_state == ClientState.DISCONNECTED:
+            with self.state_lock:
+                time_since_heartbeat = time.time() - self.last_heartbeat_time
+                if time_since_heartbeat > self.heartbeat_timeout:
+                    self.client_state = ClientState.DISCONNECTED
+                    self.leader_server = None
+                current_state = self.client_state
+            if current_state == ClientState.DISCONNECTED:
                 self.search_for_leader()
-            elif self.client_state == ClientState.CONNECTED:
+            elif current_state == ClientState.CONNECTED:
+                #self.send_heartbeats()
                 continue
+
+    def send_heartbeat(self):
+        with self.state_lock:
+            if ClientState == ClientState.CONNECTED:
+                msg = {
+                    "type": ClientMessageType.REQ_HEART_BEAT.value,
+                    "id": self.client_id,
+                    "ip": self.client_ip,
+                    "port": self.client_port
+                }
+                self.unicast.send_message(msg, ip=self.leader_server.get("ip"), port=self.leader_server.get("port")) 
+                
+    def recv_heartbeats_resp(self, message):
+        with self.state_lock:
+            if self.leader_server.get("id") != message.get('id'):
+                self.leader_server = {
+                    "id": message.get('ip'),
+                    "ip": message.get('ip'),
+                    "port": message.get('port')
+                } 
+            self.last_heartbeat_time = time.time()
+
 
 def main():
     # 1. broadcasts itself to the network

@@ -11,6 +11,7 @@ class ClientMessageType(Enum):
     RES_HEART_BEAT = 8
     REQ_MAKE_BID = 9
     RES_MAKE_BID = 10
+    REQ_REMOVE_CLIENT = 11
 
 class ServerMessageType(Enum):
     REQ_DISC = 100
