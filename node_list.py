@@ -1,7 +1,17 @@
 import threading
+from dataclasses import dataclass
 
-class NodeList:
-    
+@dataclass
+class Node:
+    """
+        class Node to replace the node_info dictionary
+    """
+    _id: str
+    ip: str
+    port: str
+
+
+class NodeList:    
     def __init__(self):
         self.nodes = {}
         self.lock = threading.Lock()

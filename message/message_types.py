@@ -12,6 +12,8 @@ class ClientMessageType(Enum):
     REQ_MAKE_BID = 9
     RES_MAKE_BID = 10
     REQ_REMOVE_CLIENT = 11
+    REQ_RETRIEVE_AUCTION_LIST = 12
+    RES_RETRIEVE_AUCTION_LIST = 12
 
 class ServerMessageType(Enum):
     REQ_DISC = 100

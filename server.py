@@ -7,6 +7,7 @@ from loguru import logger
 from enum import Enum
 from collections import defaultdict
 
+from auction.auction_room import AuctionRoom, AuctionRoomStatus
 from broadcast.broadcast import Broadcast
 from unicast.unicast import Unicast
 from message.message_handler import MessageHandler
@@ -29,13 +30,13 @@ class Server:
         self.peer_list = NodeList()
         self.client_list = NodeList()
         logger.info(f"Server starting with id: {self.server_id}, ip: {self.server_ip}, port: {self.server_port}")
+        
         # setup message resolver for the server
         self.message_handler = MessageHandler()
         self.discovery_complete = False
         self.register_callbacks()
         # setup unicast communication for the server
         self.unicast = Unicast(unicast_ip= self.server_ip, unicast_port=self.server_port)
-
         # setup broadcast communication for the server
         self.broadcast = Broadcast(self.server_ip)
 
@@ -59,6 +60,8 @@ class Server:
         self.last_heartbeat_time = time.time()
         self.votes_received = set()
     
+        self.auction_list = dict()
+
     def _get_random_election_timeout(self):
         return random.uniform(0.15, 0.30)
     
@@ -103,13 +106,17 @@ class Server:
         self.message_handler.register_handler(
             ServerMessageType.REQ_APPEND_ENTRIES.value, self.handle_append_entries
         )
-        self.message_handler.register_handler(ClientMessageType.REQ_DISC.value, self.connect_client)
+        
+        self.message_handler.register_handler(ClientMessageType.REQ_DISC.value, self.append_log)
+        self.message_handler.register_handler(ClientMessageType.REQ_JOIN_AUCTION.value, self.append_log)
+
         self.message_handler.register_handler(
             ServerMessageType.RES_APPEND_ENTRIES.value, self.handle_append_entries_resp
         )
         self.message_handler.register_handler(ClientMessageType.REQ_HEART_BEAT.value, self.handle_client_heartbeat_req)
+        self.message_handler.register_handler(ClientMessageType.REQ_RETRIEVE_AUCTION_LIST.value, self.handle_retrieve_auction_list_req)
 
-    def connect_client(self, message):
+    def append_log(self, message):
         if message["id"] == str(self.server_id):
             return
 
@@ -237,6 +244,39 @@ class Server:
                                 )
                         case ClientMessageType.REQ_REMOVE_CLIENT.value:
                             self.client_list.remove_node(message.get("id"))
+
+                        case ClientMessageType.REQ_JOIN_AUCTION.value:
+                            auction_id = message.get("auction").get("id")
+                            status = False
+                            auction = self.auction_list.get(auction_id)
+                            if auction is not None and auction.status == AuctionRoomStatus.AWAITING_PEEERS:
+                                auction.add_participant({
+                                    "id": message.get("id"),
+                                    "ip": message.get("ip"),
+                                    "port": message.get("port")
+                                })
+                                self.auction_list[auction_id] = auction
+                                status = True
+                            
+                            res_message = {
+                                "type": ClientMessageType.RES_JOIN_AUCTION.value,
+                                "id": self.server_id,
+                                "ip": self.server_ip,
+                                "port": self.server_port,
+                                "status": status
+                            }
+                            self.unicast.send_message(
+                                res_message,
+                                message.get("ip"),
+                                message.get("port")
+                            )
+
+                        case ClientMessageType.REQ_START_AUCTION.value:
+                            self.auction_list.append(
+                                AuctionRoom(    
+                                    
+                                )
+                            )
                         case _:
                             logger.info("default case")
 
@@ -427,6 +467,23 @@ class Server:
                 if key >= 0 and key < len(self.log):
                     if key > self.commit_index and val > (self.peer_list.get_len() + 1)//2 and self.log[key].term == self.term:
                         self.commit_index = key
+
+    def handle_retrieve_auction_list_req(self, message):
+        auctions = []
+        with self.state_lock:
+            for auction in self.auction_list:
+                if auction.status == AuctionRoomStatus.AWAITING_PEEERS:
+                    auctions.append(auction.to_json())
+                            
+        self.unicast.send_message(
+            {
+                "type": ClientMessageType.RES_RETRIEVE_AUCTION_LIST.value,
+                "auction": auctions
+            },
+            message.get("ip"),
+            message.get("port")
+        )
+
 
 if __name__ == "__main__":
 
