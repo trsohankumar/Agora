@@ -51,8 +51,9 @@ class Server:
         self.match_index = {}
         
         self.state_lock = threading.Lock()
-        self.heartbeat_interval = 0.05
-        self.client_heartbeat_timeout = 0.15
+        self.heartbeat_interval = 0.1   # Match client's heartbeat interval (100ms)
+        # Client sends every 0.1s, so timeout should be longer (e.g., 5-6 missed heartbeats)
+        self.client_heartbeat_timeout = 1.0  # Increased to match new interval
         self.monitor_client_list_thread = threading.Thread(target=self.remove_timeout_client_from_list, daemon=True)
         self.monitor_client_list_thread.start()
 
@@ -109,11 +110,12 @@ class Server:
         
         self.message_handler.register_handler(ClientMessageType.REQ_DISC.value, self.append_log)
         self.message_handler.register_handler(ClientMessageType.REQ_JOIN_AUCTION.value, self.append_log)
+        self.message_handler.register_handler(ClientMessageType.REQ_START_AUCTION.value, self.append_log)
 
         self.message_handler.register_handler(
             ServerMessageType.RES_APPEND_ENTRIES.value, self.handle_append_entries_resp
         )
-        self.message_handler.register_handler(ClientMessageType.REQ_HEART_BEAT.value, self.handle_client_heartbeat_req)
+        self.message_handler.register_handler(ClientMessageType.CLIENT_HEART_BEAT.value, self.handle_client_heartbeat)
         self.message_handler.register_handler(ClientMessageType.REQ_RETRIEVE_AUCTION_LIST.value, self.handle_retrieve_auction_list_req)
 
     def append_log(self, message):
@@ -126,30 +128,37 @@ class Server:
             self.log.append(LogEntries(self.term, message))
  
     def remove_timeout_client_from_list(self):
+        clients_pending_removal = set()  # Track clients we've already queued for removal
         while True:
-            time.sleep(self.client_heartbeat_timeout)
+            # Check less frequently than the timeout period
+            time.sleep(self.heartbeat_interval)
             with self.state_lock:
                 if self.state != ServerState.LEADER:
                     continue
-                client_list = self.client_list.get_all_node()
+                client_list = self.client_list.get_all_node().copy()
+                current_time = time.time()
 
+            # Check each client outside the lock to avoid holding it too long
             for client_id, client_info in client_list.items():
-                if time.time() - client_info.get("last_heartbeat") > self.client_heartbeat_timeout:
-                    with self.state_lock:
-                        self.log.append(LogEntries(self.term, {
-                            "type": ClientMessageType.REQ_REMOVE_CLIENT.value,
-                            "ip": client_info.get("ip"),
-                            "id": client_id,
-                            "port": client_info.get("port")
-                        }))
+                last_heartbeat = client_info.get("last_heartbeat", 0)
+                if current_time - last_heartbeat > self.client_heartbeat_timeout:
+                    # Only log removal once per client
+                    if client_id not in clients_pending_removal:
+                        logger.warning(f"Client {client_id} timed out. Last heartbeat: {current_time - last_heartbeat:.2f}s ago")
+                        clients_pending_removal.add(client_id)
+                        with self.state_lock:
+                            self.log.append(LogEntries(self.term, {
+                                "type": ClientMessageType.REQ_REMOVE_CLIENT.value,
+                                "ip": client_info.get("ip"),
+                                "id": client_id,
+                                "port": client_info.get("port")
+                            }))
                 
     
-    def handle_client_heartbeat_req(self, message):
+    def handle_client_heartbeat(self, message):
         """
-        Docstring for handle_client_heartbeat_resp
-        
-        :param self: Description
-        :param message: Description
+        Handle heartbeat from client (unidirectional - no response sent).
+        Updates last_heartbeat timestamp for known clients.
         """
         with self.state_lock:
             if self.state != ServerState.LEADER:
@@ -157,19 +166,12 @@ class Server:
 
             client = self.client_list.get_node(message.get('id'))
             if client is not None:
+                # Update heartbeat timestamp for known clients
                 self.client_list.add_node(message.get('id'), {
                     "ip": message.get("ip"),
                     "port": message.get("port"),
                     "last_heartbeat": time.time()
-                })
-
-                resp_message = {
-                    "type": ClientMessageType.RES_HEART_BEAT.value,
-                    "id": str(self.server_id),
-                    "ip": self.server_ip,
-                    "port": self.server_port
-                }
-                self.unicast.send_message(resp_message, message.get("ip"), message.get("port"))        
+                })        
 
 
     def start_server(self):
@@ -210,9 +212,17 @@ class Server:
                     self.transiton_to_candidate()
                 time.sleep(self.heartbeat_interval)
             elif current_state == ServerState.LEADER:
-                self.send_heartbeat()
+                self.send_heartbeat_to_peers()
+                self.send_heartbeat_to_clients()
                 time.sleep(self.heartbeat_interval)
-            
+
+                # Single-server optimization: commit all logs immediately
+                with self.state_lock:
+                    if len(self.peer_list.get_all_node()) == 0 and len(self.log) > 0:
+                        self.commit_index = len(self.log) - 1
+
+            # Process one log entry per iteration to avoid holding lock too long
+            response_to_send = None
             with self.state_lock:
                 if self.commit_index > self.last_applied and self.last_applied + 1 < len(self.log):
                     # apply the logs to state machine
@@ -224,7 +234,7 @@ class Server:
                             #
                             self.client_list.add_node(
                                 message.get("id"),
-                                {"ip": message.get("ip"), 
+                                {"ip": message.get("ip"),
                                  "port": message.get("port"),
                                  "last_heartbeat": time.time()
                                  }
@@ -232,7 +242,7 @@ class Server:
 
                             if self.state == ServerState.LEADER:
                                 logger.info(f"Sending RES_DISC to client {ClientMessageType.RES_DISC.value} {message.get('id')} {message.get('ip')} {message.get('port')}")
-                                self.unicast.send_message(
+                                response_to_send = (
                                     {
                                         "type": ClientMessageType.RES_DISC.value,
                                         "id": str(self.server_id),
@@ -244,6 +254,7 @@ class Server:
                                 )
                         case ClientMessageType.REQ_REMOVE_CLIENT.value:
                             self.client_list.remove_node(message.get("id"))
+                            logger.info(f"Removed client {message.get('id')} from client list")
 
                         case ClientMessageType.REQ_JOIN_AUCTION.value:
                             auction_id = message.get("auction").get("id")
@@ -257,28 +268,46 @@ class Server:
                                 })
                                 self.auction_list[auction_id] = auction
                                 status = True
-                            
-                            res_message = {
-                                "type": ClientMessageType.RES_JOIN_AUCTION.value,
-                                "id": self.server_id,
-                                "ip": self.server_ip,
-                                "port": self.server_port,
-                                "status": status
-                            }
-                            self.unicast.send_message(
-                                res_message,
+
+                            response_to_send = (
+                                {
+                                    "type": ClientMessageType.RES_JOIN_AUCTION.value,
+                                    "id": str(self.server_id),
+                                    "ip": self.server_ip,
+                                    "port": self.server_port,
+                                    "status": status
+                                },
                                 message.get("ip"),
                                 message.get("port")
                             )
 
                         case ClientMessageType.REQ_START_AUCTION.value:
-                            self.auction_list.append(
-                                AuctionRoom(    
-                                    
+                            auction_room = AuctionRoom(
+                                    auctioneer={"ip"},
+                                    rounds=message.get("rounds"),
+                                    item=message.get("item"),
+                                    min_bid=message.get("min_bid"),
+                                    min_bidders=message.get("min_bidders")
                                 )
+                            self.auction_list[auction_room.get_id()] = auction_room
+                            # format string to retrieve status and bidders from room
+                            response_to_send = (
+                                {
+                                    "type": ClientMessageType.RES_START_AUCTION.value,
+                                    "id": str(self.server_id),
+                                    "ip": self.server_ip,
+                                    "port": self.server_port,
+                                    "msg": f"Auction room created, awaiting bidders to join {auction_room.get_min_number_bidders() - auction_room.get_bidder_count()}"
+                                },
+                                message.get("ip"),
+                                message.get("port")
                             )
                         case _:
                             logger.info("default case")
+
+            # Send response outside the lock to avoid blocking heartbeats
+            if response_to_send is not None:
+                self.unicast.send_message(response_to_send[0], response_to_send[1], response_to_send[2])
 
 
     def transiton_to_candidate(self):
@@ -372,8 +401,25 @@ class Server:
 
         self.check_election_won()
 
-    def send_heartbeat(self):
-        # logger.info("sending heartbeats")
+    def send_heartbeat_to_clients(self):
+        """Send heartbeat to all connected clients (unidirectional - no response expected)"""
+        with self.state_lock:
+            if self.state != ServerState.LEADER:
+                return
+            clients = self.client_list.get_all_node().copy()
+
+        heartbeat_msg = {
+            "type": ClientMessageType.SERVER_HEART_BEAT.value,
+            "id": str(self.server_id),
+            "ip": self.server_ip,
+            "port": self.server_port
+        }
+
+        for client_id, client_info in clients.items():
+            self.unicast.send_message(heartbeat_msg, client_info.get("ip"), client_info.get("port"))
+
+    def send_heartbeat_to_peers(self):
+        """Send heartbeat/log replication to peer servers"""
         peers = self.peer_list.get_all_node()
 
         with self.state_lock:
@@ -385,7 +431,11 @@ class Server:
                     prev_log_term = self.log[prev_log_idx].term
 
                 # Convert LogEntries to dicts for JSON serialization
-                entries_to_send = [entry.to_dict() for entry in self.log[self.next_index.get(peer_id):]]
+                # Limit entries per message to avoid UDP size limits (typically 65KB)
+                max_entries_per_msg = 10
+                start_idx = self.next_index.get(peer_id)
+                end_idx = min(start_idx + max_entries_per_msg, len(self.log))
+                entries_to_send = [entry.to_dict() for entry in self.log[start_idx:end_idx]]
 
                 heartbeat_msg = {
                     "type": ServerMessageType.REQ_APPEND_ENTRIES.value,
@@ -471,14 +521,14 @@ class Server:
     def handle_retrieve_auction_list_req(self, message):
         auctions = []
         with self.state_lock:
-            for auction in self.auction_list:
+            for auction in self.auction_list.values():
                 if auction.status == AuctionRoomStatus.AWAITING_PEEERS:
                     auctions.append(auction.to_json())
-                            
+
         self.unicast.send_message(
             {
                 "type": ClientMessageType.RES_RETRIEVE_AUCTION_LIST.value,
-                "auction": auctions
+                "available_auctions": auctions  # Fixed: was "auction", should be "available_auctions"
             },
             message.get("ip"),
             message.get("port")
