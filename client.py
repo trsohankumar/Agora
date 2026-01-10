@@ -4,18 +4,25 @@ import threading
 import time
 from broadcast.broadcast import Broadcast
 from unicast.unicast import Unicast
-from utils.common import get_ip_port
+from utils.common import get_ip_port, DisconnectedError, RequestTimeoutError
 from message.message_handler import MessageHandler
-from ui.ui import Ui
 from enum import Enum
 from loguru import logger
 from message.message_types import ClientMessageType, ClientUiMessageType
 import queue
+from ui.ui import Ui
 from message.message import Message
+from dataclasses import dataclass, field
 
 class ClientState(Enum):
     DISCONNECTED = 0
     CONNECTED = 1
+
+@dataclass
+class PendingRequest:
+    event: threading.Event = field(default_factory=threading.Event)
+    response: Any = None
+    disconnected: bool = False
 
 class Client:
     def __init__(self):
@@ -39,37 +46,50 @@ class Client:
         self.req_heartbeat_thread = threading.Thread(target=self.send_heartbeat, daemon=True)
         self.req_heartbeat_thread.start()
 
-        # UI Section
-        self.available_auctions = []
-        self.auction_join_status = None
-        self.ui = Ui(client_msg_queue=self.message_handler)
-        self.ui_thread = threading.Thread(target=self.ui.start_ui_loop, daemon=True)
-        self.ui_thread.start()
+
+        # request/resp tracking
+        self.pending_requests: dict[str, PendingRequest] = {}
+        self.pending_lock = threading.lock()
 
 
         logger.info(f"starting client {self.client_id} @ {self.client_ip} {self.client_port}")
 
-    def _ui_loop(self):
-        while not self.ui_should_exit:
-            with self.state_lock:
-                current_state = self.client_state
+    def _send_request(self, msg, timeout: float = 10.0):
 
-            if current_state == ClientState.DISCONNECTED:
-                time.sleep(0.5)
-                continue
+        request_type = msg["type"]
+        pending = PendingRequest()
 
-            try:
-                self._show_menu_and_handle_choice()
-            except Exception as e:
-                logger.error(f"Error in UI loop: {e}")
-                time.sleep(1)
+        with self.pending_lock:
+            self.pending_requests[request_type] = pending
+
+        try:
+            self.unicast.send_message(msg, self.leader_server.get("ip"), self.leader_server.get("port"))
+            pending.event.wait(timeout=timeout)
+
+            if pending.disconnected:
+                raise DisconnectedError("Not connected to server")
+            if pending.response is None:
+                raise RequestTimeoutError(f"Request {request_type} timed out")
+            
+            return pending.response
+        finally:
+            with self.pending_lock:
+                self.pending_requests.pop(request_type, None)
+                
+    def _complete_request(self, request_type, response):
+        with self.pending_lock:
+            pending = self.pending_requests.get(request_type)
+
+        if pending:
+            pending.response = response
+            pending.event.set()
 
     def register_callbacks(self):
         self.message_handler.register_handler(ClientMessageType.RES_DISC.value, self.discover_leader)
         self.message_handler.register_handler(ClientMessageType.SERVER_HEART_BEAT.value, self.recv_server_heartbeat)
-        self.message_handler.register_handler(ClientMessageType.RES_RETRIEVE_AUCTION_LIST.value, self.handle_auction_list_resp)
-        self.message_handler.register_handler(ClientMessageType.RES_JOIN_AUCTION.value, self.handle_auction_join_res)
-        self.message_handler.register_handler(ClientMessageType.RES_START_AUCTION.value, self.handle_start_auction_res)
+        self.message_handler.register_handler(ClientMessageType.RES_RETRIEVE_AUCTION_LIST.value, self._handle_auction_list_response)
+        self.message_handler.register_handler(ClientMessageType.RES_JOIN_AUCTION.value, self._handle_join_auction_response)
+        self.message_handler.register_handler(ClientMessageType.RES_START_AUCTION.value, self._handle_start_auction_response)
 
     def discover_leader(self, message):
         with self.state_lock:
@@ -100,133 +120,55 @@ class Client:
             with self.state_lock:
                 current_state = self.client_state
                 time_since_heartbeat = time.time() - self.last_heartbeat_time
+                should_disconnect = (
+                    current_state == ClientState.CONNECTED and time_since_heartbeat > self.heartbeat_timeout
+                )
 
-                if current_state == ClientState.CONNECTED and time_since_heartbeat > self.heartbeat_timeout:
-                    logger.warning(f"Leader heartbeat timeout: {time_since_heartbeat:.2f}s > {self.heartbeat_timeout}s")
-                    self.client_state = ClientState.DISCONNECTED
-                    self.leader_server = None
-                    current_state = ClientState.DISCONNECTED
+                if should_disconnect:
+                    logger.warning(f"Heartbeat timeout")
+                    self._on_disconnect()
 
             if current_state == ClientState.DISCONNECTED:
-                self.ui.ui_message_handler.add_message(Message(ClientUiMessageType.SHOW_DISCONNECTED.value, data="Setting up connection to server....."))
-                await self.search_for_leader()
+                self.search_for_leader()
 
             time.sleep(0.1)
-                
-    def handle_start_auction_res(self, msg):
-        self.ui_msg_queue.put(msg.get("msg"))
 
-    def join_auction(self):
-        # List auction rooms still accepting clients
-        self.retrieve_auctions_from_leader()
-        # client selects the auction room
+    def _on_disconnect(self):
         with self.state_lock:
-            if not self.available_auctions:
-                print("No new auctions are available to join. Try again later")
-                return
-                
-        self.display_and_select_auction()
-        # Response - successful or failed to join
-        # If successful, client is shown the round status and current highest bids once the auction starts
-        while True:
-            with self.state_lock:
-                join_status = self.auction_join_status
-            if join_status is None:
-                time.sleep(1)
-            else:
-                if join_status == True:
-                    # TODO: Implement run_auction() method
-                    logger.info("Auction joined successfully")
-                else:
-                    print("Unable to join auction. Try Again Later!!")
-                break
-        # client is allowed to send one bid every round (round can help us order the requests)
-        # Once the auction concludes client is displayed with winning or losing status
-        # Return to main menu upon finishing the auction or failing to join
-    def handle_auction_join_res(self, msg):
-        with self.state_lock:
-            self.auction_join_status= msg.get("status")
-    
-    def retrieve_auctions_from_leader(self):
-        with self.state_lock:
-            leader_server = self.leader_server
-            if leader_server is None:
-                logger.warning("No leader server available")
-                return
-            msg = {
-                "type": ClientMessageType.REQ_RETRIEVE_AUCTION_LIST.value,
-                "id": self.client_id,
-                "ip": self.client_ip,
-                "port": self.client_port
-            }
-            leader_ip = leader_server.get("ip")
-            leader_port = leader_server.get("port")
+            self.client_state = ClientState.DISCONNECTED
+            self.leader_server = None
 
-        # Send message outside the lock
-        self.unicast.send_message(msg, leader_ip, leader_port)
-        print("Waiting for responses....")
-        time.sleep(5)
+        # wake up all blocked requests
+        with self.pending_lock:
+            for pending in self.pending_requests.values():
+                pending.disconnected = True
+                pending.event.set()
+            self.pending_requests.clear()
 
-    def handle_auction_list_resp(self, msg):
+        logger.warning("Disconnected from leader - all pending requests cancelled")
+
+    def is_connected(self):
         with self.state_lock:
-            self.available_auctions = msg.get("available_auctions")
+            return self.client_state == ClientState.CONNECTED
+
+    def _handle_auction_list_response(self, msg):
+        self._complete_request(
+            ClientMessageType.REQ_RETRIEVE_AUCTION_LIST.value,
+            msg
+        )
+
+    def _handle_join_auction_response(self, msg):
+        self._complete_request(
+            ClientMessageType.REQ_JOIN_AUCTION.value,
+            msg
+        )
+
+    def _handle_start_auction_response(self, msg):
+        self._complete_request(
+            ClientMessageType.REQ_START_AUCTION.value,
+            msg
+        )
         
-    def display_and_select_auction(self):
-        with self.state_lock:
-            auction_list = self.available_auctions
-
-        print("The list of Available auctions are:")
-        for index, auc in enumerate(auction_list, start=1):
-            print(f"{index}. {auc.get('item')}")
-        x = int(input("Enter your choice:"))
-
-        with self.state_lock:
-            msg = {
-                "type": ClientMessageType.REQ_JOIN_AUCTION.value,
-                "id": self.client_id,
-                "ip": self.client_ip,
-                "port": self.client_port,
-                "auction": self.available_auctions[x-1]
-            }
-            leader_server = self.leader_server
-            self.auction = self.available_auctions[x-1]
-
-        self.unicast.send_message(msg, leader_server.get("ip"), leader_server.get("port"))
-
-    def _show_menu_and_handle_choice(self):
-        print("="*40)
-        print("Welcome to Agora")
-        print("="*40)
-        print("Choose one of the following options")
-        print("1. Join Auction")
-        print("2. Start Auction")
-        print("3. Exit")
-        print("="*40)
-        try:
-            inp = input("Enter your choice:")
-            inp = int(inp)
-
-            with self.state_lock:
-                        if self.client_state == ClientState.DISCONNECTED:
-                            print("Lost connection to leader. Reconnecting...")
-                            return
-            match inp:
-                case 1: self.join_auction()
-                case 2: self.create_new_auction()
-                case 3: 
-                    print("Exiting..")
-                    self.ui_should_exit = True
-                    return
-
-        except ValueError:
-            print("Invalid input. Please enter a number.")
-        except KeyboardInterrupt:
-            print("\nOperation cancelled by user")
-        except Exception as e:
-            logger.error(f"Unexpected error in menu: {e}")
-            print("An error occurred. Please try again.")
-
-
     def send_heartbeat(self):
         """Send periodic heartbeats to server (no response expected)"""
         while True:
@@ -262,12 +204,19 @@ class Client:
                 }
                 logger.info(f"Updated leader info from heartbeat: {message.get('id')}")
 
-    def create_new_auction(self):
-        item = input("Enter name of item you want to sell:")
-        min_bid_amt = int(input("Enter minimum bid amount:"))
-        min_bidders =  int(input("Enter the minimum number of bidders (must be greater than 2):"))
-        no_of_rounds = int(input("Enter the number of rounds:"))
 
+    def get_auctions_list(self):
+        with self.state_lock:
+            msg = {
+                "type": ClientMessageType.REQ_RETRIEVE_AUCTION_LIST.value,
+                "id": self.client_id,
+                "ip": self.client_ip,
+                "port": self.client_port
+            }
+
+        return self._send_request(msg)
+
+    def create_new_auction(self, item: str, min_bid_amt: int, min_bidders: int, no_of_rounds: int):
         with self.state_lock:
             msg =  {
                 "type": ClientMessageType.REQ_START_AUCTION.value,
@@ -279,20 +228,21 @@ class Client:
                 "min_bidders": min_bidders,
                 "rounds": no_of_rounds
             }
-            leader_ip = self.leader_server.get("ip")
-            leader_port = self.leader_server.get("port")
 
-        # Send message outside the lock
-        self.unicast.send_message(msg, leader_ip, leader_port)
+        return self._send_request(msg= msg)
 
-        while True:
-            try:
-                ui_msg = self.ui_msg_queue.get(timeout=1.0)
-                print(ui_msg)
-            except queue.Empty:
-                continue
-    
-
+    def join_auction(self, auction_id):
+        with self.state_lock:
+            msg = {
+                "type": ClientMessageType.REQ_JOIN_AUCTION.value,
+                "id": self.client_id,
+                "ip": self.client_ip,
+                "port": self.client_id,
+                "auction_id": auction_id
+            }           
+     
+        return self._send_request(msg)
+      
 
 def main():
     # 1. broadcasts itself to the network
@@ -300,8 +250,12 @@ def main():
     # 3. starts heartbeat to leader
     # 4. no response from leader -> broadcast
     client = Client()
-    client.start_client()
 
+    ui = Ui(client=client)
+    ui_thread = threading.Thread(target=ui.start(), daemon=True)
+
+    ui_thread.start()
+    client.start_client()
 
 if __name__ == "__main__":
     main()

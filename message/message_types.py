@@ -14,10 +14,12 @@ class ClientMessageType(Enum):
     REQ_REMOVE_CLIENT = 11
     REQ_RETRIEVE_AUCTION_LIST = 12
     RES_RETRIEVE_AUCTION_LIST = 13  # Fixed: was 12, should be 13
+    RES_AUCTION_ROOM_WAIT = 14 
 
 class ClientUiMessageType(Enum):
     SHOW_DISCONNECTED = 1000
     SHOW_CONNECTED = 1001
+
 
 class ServerMessageType(Enum):
     REQ_DISC = 100

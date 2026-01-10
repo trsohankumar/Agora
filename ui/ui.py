@@ -1,21 +1,112 @@
-from message.message_handler import MessageHandler
-from message.message_types import ClientUiMessageType
+import time
+from loguru import logger
+from utils.common import DisconnectedError, RequestTimeoutError
 
 class Ui:
-    def __init__(self, client_msg_queue):
-        self.client_messgae_queue = client_msg_queue
-        self.ui_message_handler = MessageHandler()
-        self._register_callbacks()
-        self.ui_message_handler.start_message_handler()
-        self.ui_should_exit = False
+    def __init__(self, client):
+        self.client = client
+        self.running = True
+        self.waiting_for_auction = False
 
-    def _register_callbacks(self):
-        self.ui_message_handler.register_handler(ClientUiMessageType.SHOW_DISCONNECTED.value, self.handle_show_disconnected)
+    def start(self):
+        while self.running:
+            if not self.client.is_connected():
+                print("Connecting to server....")
+                time.sleep(1)
+                continue
 
-    def handle_show_disconnected(self, msg):
-        print(f"Waiting to connect to leade {msg}")
+            self._show_menu()
+
+    def _show_menu(self):
+        print("="*40)
+        print("Welcome to Agora")
+        print("="*40)
+        print("Choose one of the following options")
+        print("1. Join Auction")
+        print("2. Start Auction")
+        print("3. Exit")
+        print("="*40)
+        try:
+            inp = input("Enter your choice:").strip()
+            match inp:
+                case "1": self._join_auction_flow()
+                case "2": self._create_new_auction_flow()
+                case "3": 
+                    print("Exiting..")
+                    self.running = False
+                case _:
+                    print("Invalid choice")
+        except ValueError:
+            print("Invalid input. Please enter a number.")
+        except KeyboardInterrupt:
+            print("\nOperation cancelled by user")
+        except Exception as e:
+            logger.error(f"Unexpected error in menu: {e}")
+            print("An error occurred. Please try again.")
+
+    def _join_auction_flow(self):
+        print("Fetching available auctions....")
+        try:
+            auctions = self.client.get_auctions_list()
+        except DisconnectedError:
+            print("Lost connection to server.")
+            return
+        except RequestTimeoutError:
+            print("Request timed out. Try again")
+            return
+
+        if not auctions:
+            print("No auctions available.")
+            return
+
+        print("\nAvailable auctions:")
+        for i, auction in enumerate(auctions, 1):
+            print(f"  {i}. {auction.get('item')}")
+        try:
+            choice = int(input("\nSelect acution")) - 1
+            if not (0 <= choice < len(auctions)):
+                return
+        except ValueError:
+            print("Invalid input.")
+            return
         
+        print("Joining auction....")
 
-    def start_ui_loop(self):
-        while not self.ui_should_exit:
-            try:
+        try:
+            resp = self.client.join_auction(auctions[choice].get("id"))
+        except RequestTimeoutError:
+            print("Request timed out. Try again")
+            return
+        
+        if resp.get("result") == "success":
+            while True:
+                print("Waiting for auction to start")
+                time.sleep(5)
+
+    def _create_new_auction_flow(self):
+        try:
+            item = input("Item name: ").strip()
+            min_bid = int(input("Minimum bid: "))
+            min_bidders = int(input("Minimum bidders (>2): "))
+            rounds = int(input("Number of rounds: "))
+        except ValueError:
+            print("Invalid input.")
+            return
+        
+        print("\nCreating auction...")
+
+        try:
+            result = self.client.create_auction(item, min_bid, min_bidders, rounds)
+            print(f"Result: {result}")
+        except Exception as e:
+            print("Lost connection to server")
+
+        # if server succeded in creating an auction
+
+        while True:
+            print("Waiting")
+            time.sleep(5)
+        # run a while loop until enough peers are available. ( Sleep in the loop)
+
+        # once enough peers are available allow the client to either wait more or start the auction immediately
+        
