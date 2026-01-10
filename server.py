@@ -257,15 +257,18 @@ class Server:
                             logger.info(f"Removed client {message.get('id')} from client list")
 
                         case ClientMessageType.REQ_JOIN_AUCTION.value:
-                            auction_id = message.get("auction").get("id")
+                            auction_id = message.get("auction_id")
                             status = False
                             auction = self.auction_list.get(auction_id)
                             if auction is not None and auction.status == AuctionRoomStatus.AWAITING_PEEERS:
-                                auction.add_participant({
+                                auction.add_participant(
+                                    message.get("id"),
+                                    {
                                     "id": message.get("id"),
                                     "ip": message.get("ip"),
                                     "port": message.get("port")
-                                })
+                                     }
+                                )
                                 self.auction_list[auction_id] = auction
                                 status = True
 

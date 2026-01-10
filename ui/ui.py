@@ -60,25 +60,27 @@ class Ui:
             return
 
         print("\nAvailable auctions:")
+        print(auctions)
         for i, auction in enumerate(auctions, 1):
             print(f"  {i}. {auction.get('item')}")
         try:
-            choice = int(input("\nSelect acution")) - 1
+            choice = int(input("\nSelect acution:")) - 1
             if not (0 <= choice < len(auctions)):
                 return
         except ValueError:
             print("Invalid input.")
             return
         
-        print("Joining auction....")
+        print("Joining auction. Please Wait....")
 
         try:
             resp = self.client.join_auction(auctions[choice].get("id"))
+            print(resp)
         except RequestTimeoutError:
             print("Request timed out. Try again")
             return
         
-        if resp.get("result") == "success":
+        if resp.get("status") == True:
             while True:
                 print("Waiting for auction to start")
                 time.sleep(5)
@@ -96,15 +98,16 @@ class Ui:
         print("\nCreating auction...")
 
         try:
-            result = self.client.create_auction(item, min_bid, min_bidders, rounds)
+            result = self.client.create_new_auction(item, min_bid, min_bidders, rounds)
             print(f"Result: {result}")
-        except Exception as e:
-            print("Lost connection to server")
+        except DisconnectedError:
+            print("Lost connection to server.")
+            return
 
         # if server succeded in creating an auction
 
+        print("Waiting for bidders to join...")
         while True:
-            print("Waiting")
             time.sleep(5)
         # run a while loop until enough peers are available. ( Sleep in the loop)
 

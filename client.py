@@ -8,10 +8,8 @@ from utils.common import get_ip_port, DisconnectedError, RequestTimeoutError
 from message.message_handler import MessageHandler
 from enum import Enum
 from loguru import logger
-from message.message_types import ClientMessageType, ClientUiMessageType
-import queue
+from message.message_types import ClientMessageType
 from ui.ui import Ui
-from message.message import Message
 from dataclasses import dataclass, field
 
 class ClientState(Enum):
@@ -49,7 +47,7 @@ class Client:
 
         # request/resp tracking
         self.pending_requests: dict[str, PendingRequest] = {}
-        self.pending_lock = threading.lock()
+        self.pending_lock = threading.Lock()
 
 
         logger.info(f"starting client {self.client_id} @ {self.client_ip} {self.client_port}")
@@ -114,8 +112,9 @@ class Client:
             self.broadcast.send_broadcast(client_message)
             time.sleep(1)
 
-    async def start_client(self):
+    def start_client(self):
 
+        print("here")
         while True:
             with self.state_lock:
                 current_state = self.client_state
@@ -129,6 +128,7 @@ class Client:
                     self._on_disconnect()
 
             if current_state == ClientState.DISCONNECTED:
+                print("here")
                 self.search_for_leader()
 
             time.sleep(0.1)
@@ -154,7 +154,7 @@ class Client:
     def _handle_auction_list_response(self, msg):
         self._complete_request(
             ClientMessageType.REQ_RETRIEVE_AUCTION_LIST.value,
-            msg
+            msg.get("available_auctions")
         )
 
     def _handle_join_auction_response(self, msg):
@@ -237,12 +237,12 @@ class Client:
                 "type": ClientMessageType.REQ_JOIN_AUCTION.value,
                 "id": self.client_id,
                 "ip": self.client_ip,
-                "port": self.client_id,
+                "port": self.client_port,
                 "auction_id": auction_id
             }           
-     
+
         return self._send_request(msg)
-      
+
 
 def main():
     # 1. broadcasts itself to the network
@@ -252,7 +252,7 @@ def main():
     client = Client()
 
     ui = Ui(client=client)
-    ui_thread = threading.Thread(target=ui.start(), daemon=True)
+    ui_thread = threading.Thread(target=ui.start, daemon=True)
 
     ui_thread.start()
     client.start_client()

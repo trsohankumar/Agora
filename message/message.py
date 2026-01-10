@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import Optional
-from message_types import ClientMessageType, ServerMessageType
+from message.message_types import ClientMessageType, ServerMessageType
 
 @dataclass
 class Message:

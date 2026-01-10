@@ -21,8 +21,8 @@ class AuctionRoom:
         self.max_bidder = None
         self.min_number_of_bidders = min_bidders
 
-    def add_participant(self, participant):
-        self.bidders.add_node(participant)
+    def add_participant(self, participant_id, participant):
+        self.bidders.add_node(participant_id, participant)
         
     def to_json(self):
         return {
