@@ -12,9 +12,11 @@ from broadcast.broadcast import Broadcast
 from unicast.unicast import Unicast
 from message.message_handler import MessageHandler
 from message.message_types import ServerMessageType, ClientMessageType
-from node_list import NodeList
+from node_list import NodeList, Node
 from log.log_entries import LogEntries
 from utils.common import get_ip_port
+from utils.pending_requests import PendingRequest
+
 
 class ServerState(Enum):
     FOLLOWER = "FOLLOWER"
@@ -63,6 +65,40 @@ class Server:
     
         self.auction_list = dict()
 
+        # request/resp tracking
+        self.pending_requests: dict[str, PendingRequest] = {}
+        self.pending_lock = threading.Lock()
+
+    def _send_request(self, msg, ip, port, timeout: float = 10.0):
+
+        request_type = msg["type"]
+        pending = PendingRequest()
+
+        with self.pending_lock:
+            self.pending_requests[request_type] = pending
+
+        try:
+            self.unicast.send_message(msg, ip, port)
+            pending.event.wait(timeout=timeout)
+
+            if pending.disconnected:
+                raise DisconnectedError("Not connected to server")
+            if pending.response is None:
+                raise RequestTimeoutError(f"Request {request_type} timed out")
+            
+            return pending.response
+        finally:
+            with self.pending_lock:
+                self.pending_requests.pop(request_type, None)
+                
+    def _complete_request(self, request_type, response):
+        with self.pending_lock:
+            pending = self.pending_requests.get(request_type)
+
+        if pending:
+            pending.response = response
+            pending.event.set()
+
     def _get_random_election_timeout(self):
         return random.uniform(0.15, 0.30)
     
@@ -110,7 +146,7 @@ class Server:
         
         self.message_handler.register_handler(ClientMessageType.REQ_DISC.value, self.append_log)
         self.message_handler.register_handler(ClientMessageType.REQ_JOIN_AUCTION.value, self.append_log)
-        self.message_handler.register_handler(ClientMessageType.REQ_START_AUCTION.value, self.append_log)
+        self.message_handler.register_handler(ClientMessageType.REQ_CREATE_AUCTION.value, self.append_log)
 
         self.message_handler.register_handler(
             ServerMessageType.RES_APPEND_ENTRIES.value, self.handle_append_entries_resp
@@ -256,6 +292,12 @@ class Server:
                             self.client_list.remove_node(message.get("id"))
                             logger.info(f"Removed client {message.get('id')} from client list")
 
+                            for auction_id, auction in self.auction_list.items():
+                                if auction.get_auctioneer()._id == message.get("id"):
+                                    logger.info(f"auctioneer no longer alive")
+                                else:
+                                    auction.bidders.remove_node(message.get("id"))
+
                         case ClientMessageType.REQ_JOIN_AUCTION.value:
                             auction_id = message.get("auction_id")
                             status = False
@@ -284,9 +326,27 @@ class Server:
                                 message.get("port")
                             )
 
-                        case ClientMessageType.REQ_START_AUCTION.value:
+                            if auction.get_bidder_count() >= auction.get_min_number_bidders():
+                                # Send message to auctioneer, informing it can start the auction
+                                response = (
+                                    {
+                                        "type": ClientMessageType.RES_AUCTION_ROOM_ENABLED.value, 
+                                        "id": str(self.server_id),
+                                        "message": "Auction room ready",
+                                        "status": "Success"
+                                    },
+                                    auction.get_auctioneer().ip,
+                                    auction.get_auctioneer().port,
+                                )
+                                self.unicast.send_message(response[0], response[1], response[2])
+                                
+                        case ClientMessageType.REQ_CREATE_AUCTION.value:
                             auction_room = AuctionRoom(
-                                    auctioneer={"ip"},
+                                    auctioneer=Node(
+                                        _id=message.get("id"),
+                                        ip=message.get("ip"),
+                                        port=message.get("port")
+                                    ),
                                     rounds=message.get("rounds"),
                                     item=message.get("item"),
                                     min_bid=message.get("min_bid"),
@@ -296,7 +356,7 @@ class Server:
                             # format string to retrieve status and bidders from room
                             response_to_send = (
                                 {
-                                    "type": ClientMessageType.RES_START_AUCTION.value,
+                                    "type": ClientMessageType.RES_CREATE_AUCTION.value,
                                     "id": str(self.server_id),
                                     "ip": self.server_ip,
                                     "port": self.server_port,
@@ -305,6 +365,8 @@ class Server:
                                 message.get("ip"),
                                 message.get("port")
                             )
+                        case ClientMessageType.REQ_START_AUCTION.value:
+                            
                         case _:
                             logger.info("default case")
 
@@ -536,6 +598,68 @@ class Server:
             message.get("ip"),
             message.get("port")
         )
+
+    def auction_process(self, auction_room):
+        """
+            responsible for the entire round based bidding process 
+        """
+        # round initialized to 1 
+        # Send message to all clients in the room that request bid for round 1
+        # Await all responses
+        # Once we receive responses, send the highest bid to all clients
+        # Increment round
+        round = 1
+        while round <= auction_room.get_rounds():
+            bidders_id = set(auction_room.bidders.keys())
+            round_state = RoundState(
+                round,
+                expected_bidders=bidders_id
+            )
+            # wait for all responses (or timeout)
+            all_received = round_state.wait_for_all()
+            
+            msg = {
+                "type": ClientMessageType.REQ_MAKE_BID.value,
+                "auction_id": auction_room.id,
+                "item": auction_room.item,
+                "round": round_num,
+                "current_highest": auction_room.highest_bid
+            }
+
+            for _id, bidder in auction_room.bidders.items()
+                self.unicast.send_message(msg, bidder.get("ip"), bidder.get("port"))
+            
+            # process bids
+            highest_bidder, highest_amount = self._get_highest_bid(round_state.bids)
+            auction_room.highest_bid = highest_amount
+            auction_room.highest_bidder = highest_bidder
+            
+            # notify all clients of round result
+            result_msg = {
+                "type": ClientMessageType.RES_ROUND_RESULT.value,
+                "auction_id": auction_room.id,
+                "round": round_num,
+                "highest_bid": highest_amount,
+                "highest_bidder": highest_bidder
+            }
+            
+            for client_id, bidder in auction_room.bidders.items():
+                self.unicast.send_message(result_msg, bidder["ip"], bidder["port"])
+                        # cleanup
+            with self.rounds_lock:
+                del self.active_rounds[auction_room.id]
+            
+            round_num += 1
+
+        self._finalize_auction(auction_room)
+
+
+    def _get_highest_bid(self, bids: Dict[str, int]) -> tuple[str, int]:
+        if not bids:
+            return None, 0
+        highest_bidder = max(bids, key=bids.get)
+        return highest_bidder, bids[highest_bidder]
+
 
 
 if __name__ == "__main__":

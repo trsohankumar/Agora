@@ -11,16 +11,13 @@ from loguru import logger
 from message.message_types import ClientMessageType
 from ui.ui import Ui
 from dataclasses import dataclass, field
+from utils.pending_requests import PendingRequest
+
 
 class ClientState(Enum):
     DISCONNECTED = 0
     CONNECTED = 1
 
-@dataclass
-class PendingRequest:
-    event: threading.Event = field(default_factory=threading.Event)
-    response: Any = None
-    disconnected: bool = False
 
 class Client:
     def __init__(self):
@@ -44,6 +41,8 @@ class Client:
         self.req_heartbeat_thread = threading.Thread(target=self.send_heartbeat, daemon=True)
         self.req_heartbeat_thread.start()
 
+        #auction room
+        self.is_auction_room_enabled = False
 
         # request/resp tracking
         self.pending_requests: dict[str, PendingRequest] = {}
@@ -74,6 +73,25 @@ class Client:
             with self.pending_lock:
                 self.pending_requests.pop(request_type, None)
                 
+    def _await_request(self, msg):
+        request_type = msg["type"]
+        pending = PendingRequest()
+
+        with self.pending_lock:
+            self.pending_requests[request_type] = pending
+
+        try:
+            pending.event.wait()
+            if pending.disconnected:
+                raise DisconnectedError("Not connected to server")
+            if pending.response is None:
+                raise RequestTimeoutError(f"Request {request_type} timed out")
+            
+            return pending.response
+        finally:
+            with self.pending_lock:
+                self.pending_requests.pop(request_type, None)
+    
     def _complete_request(self, request_type, response):
         with self.pending_lock:
             pending = self.pending_requests.get(request_type)
@@ -87,7 +105,10 @@ class Client:
         self.message_handler.register_handler(ClientMessageType.SERVER_HEART_BEAT.value, self.recv_server_heartbeat)
         self.message_handler.register_handler(ClientMessageType.RES_RETRIEVE_AUCTION_LIST.value, self._handle_auction_list_response)
         self.message_handler.register_handler(ClientMessageType.RES_JOIN_AUCTION.value, self._handle_join_auction_response)
-        self.message_handler.register_handler(ClientMessageType.RES_START_AUCTION.value, self._handle_start_auction_response)
+        self.message_handler.register_handler(ClientMessageType.RES_CREATE_AUCTION.value, self._handle_start_auction_response)
+        self.message_handler.register_handler(ClientMessageType.RES_AUCTION_ROOM_ENABLED.value, self._handle_auction_room_enabled)
+        self.message_handler.register_handler(ClientMessageType.REQ_MAKE_BID.value, self._handle_make_bid)
+
 
     def discover_leader(self, message):
         with self.state_lock:
@@ -151,6 +172,10 @@ class Client:
         with self.state_lock:
             return self.client_state == ClientState.CONNECTED
 
+    def auction_room_enabled(self):
+        with self.state_lock:
+            return self.is_auction_room_enabled
+    
     def _handle_auction_list_response(self, msg):
         self._complete_request(
             ClientMessageType.REQ_RETRIEVE_AUCTION_LIST.value,
@@ -165,7 +190,7 @@ class Client:
 
     def _handle_start_auction_response(self, msg):
         self._complete_request(
-            ClientMessageType.REQ_START_AUCTION.value,
+            ClientMessageType.REQ_CREATE_AUCTION.value,
             msg
         )
         
@@ -219,7 +244,7 @@ class Client:
     def create_new_auction(self, item: str, min_bid_amt: int, min_bidders: int, no_of_rounds: int):
         with self.state_lock:
             msg =  {
-                "type": ClientMessageType.REQ_START_AUCTION.value,
+                "type": ClientMessageType.REQ_CREATE_AUCTION.value,
                 "id": self.client_id,
                 "ip": self.client_ip,
                 "port": self.client_port,
@@ -230,6 +255,23 @@ class Client:
             }
 
         return self._send_request(msg= msg)
+
+    def await_make_bid(self):
+        msg = {"type": ClientMessageType.REQ_MAKE_BID.value}
+        return self._await_request(msg)
+
+    def make_bid(self, auction_id, bid):
+        with self.state_lock:
+            msg = {
+                "type": ClientMessageType.RES_MAKE_BID.value,
+                "auction_id": auction_id,
+                "bid": bid,
+                "id": self.client_id,
+                "ip": self.client_ip,
+                "port": self.client_port
+            }
+            (ip, port) = (self.leader_server.get("ip"), self.leader_server.get("port"))
+        self.unicast.send_message(msg, ip, port)
 
     def join_auction(self, auction_id):
         with self.state_lock:
@@ -242,6 +284,27 @@ class Client:
             }           
 
         return self._send_request(msg)
+
+    def _handle_auction_room_enabled(self, msg):
+        if msg.get("status") == "Success":
+            with self.state_lock:
+                self.is_auction_room_enabled = True
+
+    def start_auction(self, inp):
+        with self.state_lock:
+            msg = {
+                "type": ClientMessageType.REQ_START_AUCTION.value,
+                "id": self.client_id,
+                "ip": self.client_ip,
+                "port": self.client_port
+            }
+        return self._send_request(msg)
+    
+    def _handle_make_bid(self, msg):
+        self._complete_request(
+            ClientMessageType.REQ_MAKE_BID.value,
+            msg
+        )
 
 
 def main():

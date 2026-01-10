@@ -3,8 +3,8 @@ from enum import Enum
 class ClientMessageType(Enum):
     REQ_DISC = 1
     RES_DISC = 2
-    REQ_START_AUCTION = 3
-    RES_START_AUCTION = 4
+    REQ_CREATE_AUCTION = 3
+    RES_CREATE_AUCTION = 4
     REQ_JOIN_AUCTION = 5
     RES_JOIN_AUCTION = 6
     CLIENT_HEART_BEAT = 7       
@@ -15,6 +15,9 @@ class ClientMessageType(Enum):
     REQ_RETRIEVE_AUCTION_LIST = 12
     RES_RETRIEVE_AUCTION_LIST = 13
     RES_AUCTION_ROOM_WAIT = 14
+    RES_AUCTION_ROOM_ENABLED = 15
+    REQ_START_AUCTION = 16
+    RES_START_AUCTION = 17
 
 class ServerMessageType(Enum):
     REQ_DISC = 100

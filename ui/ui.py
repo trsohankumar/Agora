@@ -80,10 +80,19 @@ class Ui:
             print("Request timed out. Try again")
             return
         
-        if resp.get("status") == True:
-            while True:
-                print("Waiting for auction to start")
-                time.sleep(5)
+        if resp.get("status") is not True:
+            print("Unable to join the room try again later")
+        
+        while not self.client.auction_room_enabled():    
+            time.sleep(5)
+        
+        while True:
+            msg = self.client.await_make_bid()
+            print("="*40)
+            bid = int(input(f"Please bid for round {msg.get("round")} for {msg.get("item")} (Min bid: {msg.get("current_highest") + 1}) Enter 0 (no bid)"))
+            print("="*40)
+            self.client.make_bid(msg.get("auction_id"), bid)
+        
 
     def _create_new_auction_flow(self):
         try:
@@ -105,11 +114,24 @@ class Ui:
             return
 
         # if server succeded in creating an auction
-
         print("Waiting for bidders to join...")
-        while True:
+
+        while not self.client.auction_room_enabled():    
             time.sleep(5)
         # run a while loop until enough peers are available. ( Sleep in the loop)
 
         # once enough peers are available allow the client to either wait more or start the auction immediately
+        print("")
+        print("="*40)
+        inp = int(input("Bidders have joined the room, please press any key to start the auction"))
+        print("="*40)
+
+        try:
+            result = self.client.start_auction(inp)
+            print(f"Result: {result}")
+        except DisconnectedError:
+            print("Lost connection to server.")
+            return
+
+
         
