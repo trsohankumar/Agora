@@ -57,7 +57,7 @@ class AuctionRoom:
     def to_json(self):
         return {
             'id': str(self._id),
-            'auctioneer': self.auctioneer,
+            'auctioneer': self.auctioneer.dict(),
             'bidders': self.bidders.get_all_node(),
             'status': self.status.value if self.status else None,
             'rounds': self.rounds,

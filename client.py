@@ -119,7 +119,7 @@ class Client:
         )
         self.message_handler.register_handler(
             ClientMessageType.RES_CREATE_AUCTION.value,
-            self._handle_start_auction_response,
+            self._handle_create_auction_response,
         )
         self.message_handler.register_handler(
             ClientMessageType.RES_AUCTION_ROOM_ENABLED.value,
@@ -127,6 +127,12 @@ class Client:
         )
         self.message_handler.register_handler(
             ClientMessageType.REQ_MAKE_BID.value, self._handle_make_bid
+        )
+        self.message_handler.register_handler(
+            ClientMessageType.RES_START_AUCTION.value, self._handle_start_auction_result
+        )
+        self.message_handler.register_handler(
+            ClientMessageType.RES_ROUND_RESULT.value, self._handle_round_result
         )
 
     def discover_leader(self, message):
@@ -205,7 +211,7 @@ class Client:
     def _handle_join_auction_response(self, msg):
         self._complete_request(ClientMessageType.REQ_JOIN_AUCTION.value, msg)
 
-    def _handle_start_auction_response(self, msg):
+    def _handle_create_auction_response(self, msg):
         self._complete_request(ClientMessageType.REQ_CREATE_AUCTION.value, msg)
 
     def send_heartbeat(self):
@@ -314,11 +320,12 @@ class Client:
             with self.state_lock:
                 self.is_auction_room_enabled = True
 
-    def start_auction(self):
+    def start_auction(self, auction_id):
         with self.state_lock:
             msg = {
                 "type": ClientMessageType.REQ_START_AUCTION.value,
                 "id": self.client_id,
+                "auction_id": auction_id,
                 "ip": self.client_ip,
                 "port": self.client_port,
             }
@@ -326,6 +333,12 @@ class Client:
 
     def _handle_make_bid(self, msg):
         self._complete_request(ClientMessageType.REQ_MAKE_BID.value, msg)
+
+    def _handle_start_auction_result(self, msg):
+        self._complete_request(ClientMessageType.REQ_START_AUCTION.value, msg)
+
+    def _handle_round_result(self, msg):
+        self._complete_request(ClientMessageType.RES_ROUND_RESULT.value, msg)
 
 
 def main():

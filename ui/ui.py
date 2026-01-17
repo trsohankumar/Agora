@@ -125,6 +125,7 @@ class Ui:
         try:
             result = self.client.create_new_auction(item, min_bid, min_bidders, rounds)
             print(f"Result: {result}")
+            auction_id = result.get("auction_id")
         except DisconnectedError:
             print("Lost connection to server.")
             return
@@ -139,16 +140,12 @@ class Ui:
         # once enough peers are available allow the client to either wait more or start the auction immediately
         print("")
         print("=" * 40)
-        _ = int(
-            input(
-                "Bidders have joined the room, please press any key to start the auction"
-            )
-        )
+        _ = input("Bidders have joined the room, please press any key to start the auction:")
         print("=" * 40)
 
         try:
-            result = self.client.start_auction()
-            print(f"Result: {result}")
+            result = self.client.start_auction(auction_id)
+            print(result.get("msg"))
         except DisconnectedError:
             print("Lost connection to server.")
             return
@@ -156,9 +153,7 @@ class Ui:
         while True:
             msg = self.client.await_round_result()
 
-            print(
-                f"The highest bid for round {msg.get("round")} is {msg.get("current_highest")}"
-            )
+            print(f"The highest bid for round {msg.get("round")} is {msg.get("current_highest")}")
 
             if msg.get("is_final_round"):
                 print(f"The winner of the auction is {msg.get("highest_bidder")}")
