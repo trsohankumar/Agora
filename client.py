@@ -160,7 +160,6 @@ class Client:
 
     def start_client(self):
 
-        print("here")
         while True:
             with self.state_lock:
                 current_state = self.client_state
@@ -175,7 +174,6 @@ class Client:
                     self._on_disconnect()
 
             if current_state == ClientState.DISCONNECTED:
-                print("here")
                 self.search_for_leader()
 
             time.sleep(0.1)
