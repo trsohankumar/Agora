@@ -313,7 +313,21 @@ class Server:
                     # apply the logs to state machine
                     self.last_applied += 1
                     entry = self.log[self.last_applied]
-                    logger.info(f"[STATE] Applying log entry {self.last_applied}/{len(self.log)-1} | Term: {entry.term} | Type: {entry.command.get('type')} | Client: {entry.command.get('id', 'N/A')[:8]}...")
+
+                    # Log the entire log state in a readable format
+                    logger.info(f"Current Log State - Total Entries: {len(self.log)}")
+                    for idx, log_entry in enumerate(self.log):
+                        status = (
+                            "[APPLIED]" if idx <= self.last_applied else "[PENDING]"
+                        )
+                        cmd = log_entry.command
+                        logger.info(
+                            f"  [{idx:3d}] {status:10} | Term: {log_entry.term} | "
+                            f"Type: {cmd.get('type', 'N/A'):2} | "
+                            f"Client: {cmd.get('id', 'N/A')} | "
+                        )
+                    logger.info(f"Now applying entry {self.last_applied}")
+
                     message = entry.command
                     match message.get("type"):
                         case ClientMessageType.REQ_DISC.value:
