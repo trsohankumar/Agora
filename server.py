@@ -312,8 +312,9 @@ class Server:
                 ):
                     # apply the logs to state machine
                     self.last_applied += 1
-                    logger.info(f"{self.log}")
-                    message = self.log[self.last_applied].command
+                    entry = self.log[self.last_applied]
+                    logger.info(f"[STATE] Applying log entry {self.last_applied}/{len(self.log)-1} | Term: {entry.term} | Type: {entry.command.get('type')} | Client: {entry.command.get('id', 'N/A')[:8]}...")
+                    message = entry.command
                     match message.get("type"):
                         case ClientMessageType.REQ_DISC.value:
                             #
