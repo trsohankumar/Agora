@@ -39,7 +39,7 @@ class RoundState:
 
 class AuctionRoom:
     def __init__(self, auctioneer:Node, rounds:int, item:str, min_bid:int, min_bidders:int):
-        self._id = str(uuid.uuid4())
+        self._id = str(uuid.uuid5(uuid.NAMESPACE_DNS, item))
         self.auctioneer = auctioneer
         self.bidders = NodeList()
         self.status = AuctionRoomStatus.AWAITING_PEEERS

@@ -369,6 +369,8 @@ class Server:
 
                         case ClientMessageType.REQ_JOIN_AUCTION.value:
                             auction_id = message.get("auction_id")
+                            logger.debug(f"The auction id is {self.auction_list}")
+                            logger.debug(f"The auction id is {auction_id}")
                             status = False
                             auction = self.auction_list.get(auction_id)
                             if (
@@ -438,6 +440,7 @@ class Server:
                                 min_bidders=message.get("min_bidders"),
                             )
                             self.auction_list[auction_room.get_id()] = auction_room
+                            logger.debug(f"{auction_room.to_json()}")
                             # format string to retrieve status and bidders from room
                             response_to_send = (
                                 {
@@ -494,7 +497,7 @@ class Server:
                             logger.info("default case")
 
             # Send response outside the lock to avoid blocking heartbeats
-            if response_to_send is not None:
+            if current_state == ServerState.LEADER and response_to_send is not None:
                 self.unicast.send_message(
                     response_to_send[0], response_to_send[1], response_to_send[2]
                 )
