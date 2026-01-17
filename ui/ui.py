@@ -91,19 +91,23 @@ class Ui:
 
         while True:
             msg = self.client.await_make_bid()
-            print("=" * 40)
-            bid = int(
-                input(
-                    f"Please bid for round {msg.get("round")} for {msg.get("item")} (Min bid: {msg.get("current_highest") + 1}) Enter 0 (no bid)"
-                )
-            )
-            print("=" * 40)
+
+            while True:
+                print("=" * 40)
+                bid = int(input(f"Please bid for round {msg.get("round")} for {msg.get("item")} (Min bid: {msg.get("current_highest") + 1}) Enter 0 (no bid)"))
+                print("=" * 40)
+
+                if bid > msg.get("current_highest") or bid == 0:
+                    break
+
+                print("Invalid bid entered. Try again")
+
             self.client.make_bid(msg.get("auction_id"), bid)
 
             msg = self.client.await_round_result()
 
             print(
-                f"The highest bid for round {msg.get("round")} is {msg.get("current_highest")}"
+                f"The highest bid for round {msg.get("round")} is {msg.get("highest_bid")}"
             )
 
             if msg.get("is_final_round"):

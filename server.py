@@ -749,7 +749,7 @@ class Server:
                 "auction_id": auction_room.get_id(),
                 "item": auction_room.item,
                 "round": round_num,
-                "current_highest": auction_room.max_bid,
+                "current_highest": auction_room.min_bid,
             }
 
             for _, bidder in auction_room.bidders.get_all_node().items():
@@ -760,7 +760,7 @@ class Server:
 
             # process bids
             highest_bidder, highest_amount = self._get_highest_bid(round_state.bids)
-            auction_room.max_bid = highest_amount
+            auction_room.min_bid = highest_amount
             auction_room.max_bidder = highest_bidder
 
             is_final_round = False
