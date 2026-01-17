@@ -1,7 +1,12 @@
 import uuid
+import threading
+
+from enum import Enum
+from typing import Dict
+from dataclasses import dataclass, field
+
 from node_list import NodeList
 from node_list import Node
-from enum import Enum
 
 class AuctionRoomStatus(Enum):
     AWAITING_PEEERS = 0
@@ -11,13 +16,12 @@ class AuctionRoomStatus(Enum):
 @dataclass
 class RoundState:
     round_num: int
-    expected_bidders: set[str]  # client IDs we're waiting for
-    bids: Dict[str, int] = field(default_factory=dict)  # client_id -> bid amount
+    expected_bidders: set[str]
+    bids: Dict[str, int] = field(default_factory=dict)
     all_received: threading.Event = field(default_factory=threading.Event)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     def add_bid(self, client_id: str, amount: int) -> bool:
-        """Add a bid. Returns True if all bids are now received."""
         with self.lock:
             if client_id not in self.expected_bidders:
                 return False
@@ -29,8 +33,7 @@ class RoundState:
                 return True
         return False
 
-    def wait_for_all(self, timeout: float = 30.0) -> bool:
-        """Block until all bids received or timeout. Returns True if all received."""
+    def wait_for_all(self) -> bool:
         return self.all_received.wait()
 
 
@@ -47,11 +50,10 @@ class AuctionRoom:
         self.max_bid = 0
         self.max_bidder = None
         self.min_number_of_bidders = min_bidders
-        self.round_state = RoundState()
-
+        
     def add_participant(self, participant_id, participant):
         self.bidders.add_node(participant_id, participant)
-        
+
     def to_json(self):
         return {
             'id': str(self._id),
@@ -77,6 +79,12 @@ class AuctionRoom:
     
     def get_auctioneer(self):
         return self.auctioneer
+    
+    def get_max_bidder(self):
+        return self.max_bid
+    
+    def get_max_bid_amt(self):
+        return self.max_bid
 
     def get_rounds(self):
         return self.rounds

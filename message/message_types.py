@@ -1,5 +1,6 @@
 from enum import Enum
 
+
 class ClientMessageType(Enum):
     REQ_DISC = 1
     RES_DISC = 2
@@ -7,8 +8,8 @@ class ClientMessageType(Enum):
     RES_CREATE_AUCTION = 4
     REQ_JOIN_AUCTION = 5
     RES_JOIN_AUCTION = 6
-    CLIENT_HEART_BEAT = 7       
-    SERVER_HEART_BEAT = 8       
+    CLIENT_HEART_BEAT = 7
+    SERVER_HEART_BEAT = 8
     REQ_MAKE_BID = 9
     RES_MAKE_BID = 10
     REQ_REMOVE_CLIENT = 11
@@ -18,6 +19,9 @@ class ClientMessageType(Enum):
     RES_AUCTION_ROOM_ENABLED = 15
     REQ_START_AUCTION = 16
     RES_START_AUCTION = 17
+    RES_ROUND_RESULT = 18
+    RES_AUCTION_RESULT = 19
+
 
 class ServerMessageType(Enum):
     REQ_DISC = 100
