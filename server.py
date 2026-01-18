@@ -14,10 +14,12 @@ from unicast.unicast import Unicast
 from broadcast.broadcast import Broadcast
 from message.message_handler import MessageHandler
 from message.message_types import ServerMessageType, ClientMessageType
+from message.message import Message
 from node_list import NodeList, Node
 from log.log_entries import LogEntries
 from utils.common import DisconnectedError, RequestTimeoutError, get_ip_port
 from utils.pending_requests import PendingRequest
+
 
 class ServerState(Enum):
     FOLLOWER = "FOLLOWER"
@@ -28,11 +30,15 @@ class ServerState(Enum):
 class Server:
     def __init__(self, server_name):
         ip, port = get_ip_port()
-        self.server_node = Node(_id=str(uuid.uuid5(uuid.NAMESPACE_DNS, server_name)), ip=ip, port=port)
+        self.server_node = Node(
+            _id=str(uuid.uuid5(uuid.NAMESPACE_DNS, server_name)), ip=ip, port=port
+        )
         self.state = ServerState.FOLLOWER
         self.peer_list = NodeList()
-        self.client_list = NodeList() # will need to be removed
-        logger.info(f"Server starting with id: {self.server_node._id}, ip: {self.server_node.ip}, port: {self.server_node.port}")
+        self.client_list = NodeList()  # will need to be removed
+        logger.info(
+            f"Server starting with id: {self.server_node._id}, ip: {self.server_node.ip}, port: {self.server_node.port}"
+        )
 
         # setup message resolver for the server
         self.message_handler = MessageHandler()
@@ -74,27 +80,25 @@ class Server:
         self.pending_requests: dict[str, PendingRequest] = {}
         self.pending_lock = threading.Lock()
 
-    def _send_request(self, msg, ip, port, timeout: float = 10.0):
-
-        request_type = msg["type"]
+    def _send_request(self, msg_type, rec_node, data={}, timeout: float = 10.0):
         pending = PendingRequest()
 
         with self.pending_lock:
-            self.pending_requests[request_type] = pending
+            self.pending_requests[msg_type] = pending
 
         try:
-            self.unicast.send_message(msg, ip, port)
+            self.unicast.send_message(msg_type, rec_node=rec_node, data=data)
             pending.event.wait(timeout=timeout)
 
             if pending.disconnected:
                 raise DisconnectedError("Not connected to server")
             if pending.response is None:
-                raise RequestTimeoutError(f"Request {request_type} timed out")
+                raise RequestTimeoutError(f"Request {msg_type} timed out")
 
             return pending.response
         finally:
             with self.pending_lock:
-                self.pending_requests.pop(request_type, None)
+                self.pending_requests.pop(msg_type, None)
 
     def _complete_request(self, request_type, response):
         with self.pending_lock:
@@ -108,45 +112,61 @@ class Server:
         return random.uniform(0.15, 0.30)
 
     def handle_disc_resp(self, msg):
-
-        if msg["id"] == str(self.server_node._id):
+        """
+        This method is responsible to add new peers after discovery
+        """
+        if msg.sender._id == self.server_node._id:
             return
 
         logger.info(f"Handling message: {msg}")
-        if self.peer_list.get_node(msg["id"]) == None:
-            self.peer_list.add_node(msg["id"], {"ip": msg["ip"], "port": msg["port"]})
+        if self.peer_list.get_node(msg.sender._id) is None:
+            self.peer_list.add_node(msg.sender._id, msg.sender)
+
             # Initialize next_index and match_index for new peer
             with self.state_lock:
                 if self.state == ServerState.LEADER:
-                    self.next_index[msg["id"]] = len(self.log)
-                    self.match_index[msg["id"]] = -1
+                    self.next_index[msg.sender._id] = len(self.log)
+                    self.match_index[msg.sender._id] = -1
 
     def handle_disc_req(self, msg):
-        if msg["id"] == str(self.server_node._id):
+        """
+        This method is responsible to handle discovery requests from other servers
+        """
+        sender_id = msg.sender._id
+        if sender_id == self.server_node._id:
             return
+
         logger.info(f"Handling message: {msg}")
-        if self.peer_list.get_node(msg["id"]) == None:
-            self.peer_list.add_node(msg["id"], {"ip": msg["ip"], "port": msg["port"]})
+
+        peer_node = Node(sender_id, msg.sender.ip, msg.sender.por)
+
+        if self.peer_list.get_node(sender_id) is None:
+            self.peer_list.add_node(sender_id, peer_node)
+
             # Initialize next_index and match_index for new peer
             with self.state_lock:
                 if self.state == ServerState.LEADER:
-                    self.next_index[msg["id"]] = len(self.log)
-                    self.match_index[msg["id"]] = -1
-            return_messge = {
-                "type": ServerMessageType.RES_DISC.value,
-                "ip": self.server_node.ip,
-                "port": self.server_node.port,
-                "id": str(self.server_node._id),
-            }
-            self.unicast.send_message(return_messge, msg["ip"], msg["port"])
+                    self.next_index[sender_id] = len(self.log)
+                    self.match_index[sender_id] = -1
+
+            self.unicast.send_message(
+                ServerMessageType.RES_DISC.value, msg.sender.ip, msg.sender.port
+            )
 
     def register_callbacks(self):
+        """
+        Method to register functions for handling messages
+        """
+
+        # Server discovery messages
         self.message_handler.register_handler(
             ServerMessageType.REQ_DISC.value, self.handle_disc_req
         )
         self.message_handler.register_handler(
             ServerMessageType.RES_DISC.value, self.handle_disc_resp
         )
+
+        # Server raft message
         self.message_handler.register_handler(
             ServerMessageType.REQ_VOTE.value, self.handle_request_vote
         )
@@ -156,7 +176,11 @@ class Server:
         self.message_handler.register_handler(
             ServerMessageType.REQ_APPEND_ENTRIES.value, self.handle_append_entries
         )
+        self.message_handler.register_handler(
+            ServerMessageType.RES_APPEND_ENTRIES.value, self.handle_append_entries_resp
+        )
 
+        # Client messages sent to server
         self.message_handler.register_handler(
             ClientMessageType.REQ_DISC.value, self.append_log
         )
@@ -172,10 +196,6 @@ class Server:
         self.message_handler.register_handler(
             ClientMessageType.RES_MAKE_BID.value, self.append_log
         )
-
-        self.message_handler.register_handler(
-            ServerMessageType.RES_APPEND_ENTRIES.value, self.handle_append_entries_resp
-        )
         self.message_handler.register_handler(
             ClientMessageType.CLIENT_HEART_BEAT.value, self.handle_client_heartbeat
         )
@@ -184,31 +204,40 @@ class Server:
             self.handle_retrieve_auction_list_req,
         )
 
-    def append_log(self, message):
-        if message["id"] == str(self.server_node._id):
+    def append_log(self, msg):
+        """
+        This method appends data to the log
+
+        :param message: The message that is to be appended to the log
+        """
+        if msg.sender._id == self.server_node._id:
             return
 
         with self.state_lock:
             if self.state != ServerState.LEADER:
                 return
-            self.log.append(LogEntries(self.term, message))
+            self.log.append(LogEntries(self.term, msg))
 
     def remove_timeout_client_from_list(self):
-        clients_pending_removal = (
-            set()
-        )  # Track clients we've already queued for removal
+        """
+        This function removes a client that has timeout from the client list
+        """
+        clients_pending_removal = set()
+
+        # Track clients we've already queued for removal
         while True:
             # Check less frequently than the timeout period
             time.sleep(self.heartbeat_interval)
+
             with self.state_lock:
                 if self.state != ServerState.LEADER:
                     continue
                 client_list = self.client_list.get_all_node().copy()
-                current_time = time.monotonic_ns()
 
-            # Check each client outside the lock to avoid holding it too long
+            current_time = time.monotonic_ns()
+
             for client_id, client_info in client_list.items():
-                last_heartbeat = client_info.get("last_heartbeat", 0)
+                last_heartbeat = client_info.last_heartbeat
                 if current_time - last_heartbeat > self.client_heartbeat_timeout:
                     # Only log removal once per client
                     if client_id not in clients_pending_removal:
@@ -216,18 +245,12 @@ class Server:
                             f"Client {client_id} timed out. Last heartbeat: {current_time - last_heartbeat:.2f}s ago"
                         )
                         clients_pending_removal.add(client_id)
+                        message = Message(
+                            sender=client_info,
+                            message_type=ClientMessageType.REQ_REMOVE_CLIENT.value,
+                        )
                         with self.state_lock:
-                            self.log.append(
-                                LogEntries(
-                                    self.term,
-                                    {
-                                        "type": ClientMessageType.REQ_REMOVE_CLIENT.value,
-                                        "ip": client_info.get("ip"),
-                                        "id": client_id,
-                                        "port": client_info.get("port"),
-                                    },
-                                )
-                            )
+                            self.log.append(LogEntries(self.term, message))
 
     def handle_client_heartbeat(self, message):
         """
@@ -238,21 +261,14 @@ class Server:
             if self.state != ServerState.LEADER:
                 return
 
-            client = self.client_list.get_node(message.get("id"))
+            client = self.client_list.get_node(message.sender._id)
             if client is not None:
                 # Update heartbeat timestamp for known clients
-                self.client_list.add_node(
-                    message.get("id"),
-                    {
-                        "ip": message.get("ip"),
-                        "port": message.get("port"),
-                        "last_heartbeat": time.monotonic_ns(),
-                    },
-                )
+                self.client_list.add_node(message.sender._id, message.sender)
 
     def start_server(self):
         """
-            method responsible to initialize the server
+        method responsible to initialize the server
         """
         self.message_handler.start_message_handler()
         self.unicast.start_unicast_listen(self.message_handler)
@@ -274,7 +290,7 @@ class Server:
 
     def run_server_loop(self):
         """
-            mesthod responsible for server state transitions
+        mesthod responsible for server state transitions
         """
         while True:
             with self.state_lock:
@@ -286,235 +302,218 @@ class Server:
                     self.discovery_complete
                     and time_since_heartbeat > self.election_timeout
                 ):
-                    logger.info(f"Time since last heartbeat: {time_since_heartbeat} greater than election timeout: {self.election_timeout}, election timeout occurred.")
+                    logger.info(
+                        f"Time since last heartbeat: {time_since_heartbeat} greater than election timeout: {self.election_timeout}, election timeout occurred."
+                    )
                     self.transiton_to_candidate()
-                time.sleep(self.heartbeat_interval) # can be removed later if there is no use
-            
+
             elif current_state == ServerState.CANDIDATE:
                 if time_since_heartbeat > self.election_timeout:
                     logger.info("Candidate timeout occurred. Starting new election")
                     self.transiton_to_candidate()
-                
-                time.sleep(self.heartbeat_interval)
-                
+
             elif current_state == ServerState.LEADER:
                 self.send_heartbeat_to_peers()
                 self.send_heartbeat_to_clients()
-                time.sleep(self.heartbeat_interval)
 
                 # Single-server optimization: commit all logs immediately
-                with self.state_lock:
-                    if len(self.peer_list.get_all_node()) == 0 and len(self.log) > 0:
-                        self.commit_index = len(self.log) - 1
+                # with self.state_lock:
+                # if len(self.peer_list.get_all_node()) == 0 and len(self.log) > 0:
+                # self.commit_index = len(self.log) - 1
+            self._commit_log()
+            time.sleep(self.heartbeat_interval)
 
-            # Process one log entry per iteration to avoid holding lock too long
-            response_to_send = None
-            with self.state_lock:
-                if (
-                    self.commit_index > self.last_applied
-                    and self.last_applied + 1 < len(self.log)
-                ):
-                    # apply the logs to state machine
-                    self.last_applied += 1
-                    entry = self.log[self.last_applied]
+    def _commit_log(self):
+        # Process one log entry per iteration to avoid holding lock too long
+        response_to_send = None
+        with self.state_lock:
+            if self.commit_index > self.last_applied and self.last_applied + 1 < len(
+                self.log
+            ):
 
-                    # Log the entire log state in a readable format
-                    logger.info(f"Current Log State - Total Entries: {len(self.log)}")
-                    for idx, log_entry in enumerate(self.log):
-                        status = (
-                            "[APPLIED]" if idx <= self.last_applied else "[PENDING]"
-                        )
-                        cmd = log_entry.command
+                # apply the logs to state machine
+                self.last_applied += 1
+                entry = self.log[self.last_applied]
+
+                logger.info(f"Current Log State - Total Entries: {len(self.log)}")
+                for idx, log_entry in enumerate(self.log):
+                    status = "[APPLIED]" if idx <= self.last_applied else "[PENDING]"
+                    cmd = log_entry.command
+                    logger.info(
+                        f"  [{idx:3d}] {status:10} | Term: {log_entry.term} | "
+                        f"Type: {cmd.get('type', 'N/A'):2} | "
+                        f"Client: {cmd.get('id', 'N/A')} | "
+                    )
+                logger.info(f"Now applying entry {self.last_applied}")
+
+                message = entry.command
+                match message.message_type:
+                    case ClientMessageType.REQ_DISC.value:
+                        node = message.sender.copy()
+                        node.last_heartbeat = time.monotonic_ns()
+                        self.client_list.add_node(message.sender._id, node)
+
+                        if self.state == ServerState.LEADER:
+                            logger.info(
+                                f"Sending RES_DISC to client {ClientMessageType.RES_DISC.value} {message.get('id')} {message.get('ip')} {message.get('port')}"
+                            )
+                            
+                            return ClientMessageType.RES_DISC.value, message.sender, {}
+                        # Refactoring done until here 
+                    case ClientMessageType.REQ_REMOVE_CLIENT.value:
+                        self.client_list.remove_node(message.sender"id"))
                         logger.info(
-                            f"  [{idx:3d}] {status:10} | Term: {log_entry.term} | "
-                            f"Type: {cmd.get('type', 'N/A'):2} | "
-                            f"Client: {cmd.get('id', 'N/A')} | "
+                            f"Removed client {message.get('id')} from client list"
                         )
-                    logger.info(f"Now applying entry {self.last_applied}")
 
-                    message = entry.command
-                    match message.get("type"):
-                        case ClientMessageType.REQ_DISC.value:
-                            #
-                            self.client_list.add_node(
+                        for auction_id, auction in self.auction_list.items():
+                            if auction.get_auctioneer()._id == message.sender._id:
+                                logger.info(f"auctioneer no longer alive")
+                            else:
+                                auction.bidders.remove_node(message.get("id"))
+
+                    case ClientMessageType.REQ_JOIN_AUCTION.value:
+                        auction_id = message.get("auction_id")
+                        logger.debug(f"The auction id is {self.auction_list}")
+                        logger.debug(f"The auction id is {auction_id}")
+                        status = False
+                        auction = self.auction_list.get(auction_id)
+                        if (
+                            auction is not None
+                            and auction.status == AuctionRoomStatus.AWAITING_PEEERS
+                        ):
+                            auction.add_participant(
                                 message.get("id"),
                                 {
+                                    "id": message.get("id"),
                                     "ip": message.get("ip"),
                                     "port": message.get("port"),
-                                    "last_heartbeat": time.monotonic_ns(),
                                 },
                             )
+                            self.auction_list[auction_id] = auction
+                            status = True
 
-                            if self.state == ServerState.LEADER:
-                                logger.info(
-                                    f"Sending RES_DISC to client {ClientMessageType.RES_DISC.value} {message.get('id')} {message.get('ip')} {message.get('port')}"
-                                )
-                                response_to_send = (
-                                    {
-                                        "type": ClientMessageType.RES_DISC.value,
-                                        "id": str(self.server_node._id),
-                                        "ip": self.server_node.ip,
-                                        "port": self.server_node.port,
-                                    },
-                                    message.get("ip"),
-                                    message.get("port"),
-                                )
-                        case ClientMessageType.REQ_REMOVE_CLIENT.value:
-                            self.client_list.remove_node(message.get("id"))
-                            logger.info(
-                                f"Removed client {message.get('id')} from client list"
+                        response_to_send = (
+                            {
+                                "type": ClientMessageType.RES_JOIN_AUCTION.value,
+                                "id": str(self.server_node._id),
+                                "ip": self.server_node.ip,
+                                "port": self.server_node.port,
+                                "status": status,
+                            },
+                            message.get("ip"),
+                            message.get("port"),
+                        )
+
+                        if (
+                            auction.get_bidder_count()
+                            >= auction.get_min_number_bidders()
+                        ):
+                            # Send message to auctioneer and all bidders that auction room is ready
+                            room_enabled_msg = {
+                                "type": ClientMessageType.RES_AUCTION_ROOM_ENABLED.value,
+                                "id": str(self.server_node._id),
+                                "message": "Auction room ready",
+                                "status": "Success",
+                            }
+
+                            # Send to auctioneer
+                            self.unicast.send_message(
+                                room_enabled_msg,
+                                auction.get_auctioneer().ip,
+                                auction.get_auctioneer().port,
                             )
 
-                            for auction_id, auction in self.auction_list.items():
-                                if auction.get_auctioneer()._id == message.get("id"):
-                                    logger.info(f"auctioneer no longer alive")
-                                else:
-                                    auction.bidders.remove_node(message.get("id"))
-
-                        case ClientMessageType.REQ_JOIN_AUCTION.value:
-                            auction_id = message.get("auction_id")
-                            logger.debug(f"The auction id is {self.auction_list}")
-                            logger.debug(f"The auction id is {auction_id}")
-                            status = False
-                            auction = self.auction_list.get(auction_id)
-                            if (
-                                auction is not None
-                                and auction.status == AuctionRoomStatus.AWAITING_PEEERS
-                            ):
-                                auction.add_participant(
-                                    message.get("id"),
-                                    {
-                                        "id": message.get("id"),
-                                        "ip": message.get("ip"),
-                                        "port": message.get("port"),
-                                    },
-                                )
-                                self.auction_list[auction_id] = auction
-                                status = True
-
-                            response_to_send = (
-                                {
-                                    "type": ClientMessageType.RES_JOIN_AUCTION.value,
-                                    "id": str(self.server_node._id),
-                                    "ip": self.server_node.ip,
-                                    "port": self.server_node.port,
-                                    "status": status,
-                                },
-                                message.get("ip"),
-                                message.get("port"),
-                            )
-
-                            if (
-                                auction.get_bidder_count()
-                                >= auction.get_min_number_bidders()
-                            ):
-                                # Send message to auctioneer and all bidders that auction room is ready
-                                room_enabled_msg = {
-                                    "type": ClientMessageType.RES_AUCTION_ROOM_ENABLED.value,
-                                    "id": str(self.server_node._id),
-                                    "message": "Auction room ready",
-                                    "status": "Success",
-                                }
-
-                                # Send to auctioneer
+                            # Send to all bidders
+                            for _, bidder in auction.bidders.get_all_node().items():
                                 self.unicast.send_message(
                                     room_enabled_msg,
-                                    auction.get_auctioneer().ip,
-                                    auction.get_auctioneer().port,
+                                    bidder.get("ip"),
+                                    bidder.get("port"),
                                 )
 
-                                # Send to all bidders
-                                for _, bidder in auction.bidders.get_all_node().items():
-                                    self.unicast.send_message(
-                                        room_enabled_msg,
-                                        bidder.get("ip"),
-                                        bidder.get("port"),
-                                    )
-
-                        case ClientMessageType.REQ_CREATE_AUCTION.value:
-                            auction_room = AuctionRoom(
-                                auctioneer=Node(
-                                    _id=message.get("id"),
-                                    ip=message.get("ip"),
-                                    port=message.get("port"),
-                                ),
-                                rounds=message.get("rounds"),
-                                item=message.get("item"),
-                                min_bid=message.get("min_bid"),
-                                min_bidders=message.get("min_bidders"),
-                            )
-                            self.auction_list[auction_room.get_id()] = auction_room
-                            logger.debug(f"{auction_room.to_json()}")
-                            # format string to retrieve status and bidders from room
+                    case ClientMessageType.REQ_CREATE_AUCTION.value:
+                        auction_room = AuctionRoom(
+                            auctioneer=Node(
+                                _id=message.get("id"),
+                                ip=message.get("ip"),
+                                port=message.get("port"),
+                            ),
+                            rounds=message.get("rounds"),
+                            item=message.get("item"),
+                            min_bid=message.get("min_bid"),
+                            min_bidders=message.get("min_bidders"),
+                        )
+                        self.auction_list[auction_room.get_id()] = auction_room
+                        logger.debug(f"{auction_room.to_json()}")
+                        # format string to retrieve status and bidders from room
+                        response_to_send = (
+                            {
+                                "type": ClientMessageType.RES_CREATE_AUCTION.value,
+                                "id": str(self.server_node._id),
+                                "ip": self.server_node.ip,
+                                "port": self.server_node.port,
+                                "auction_id": auction_room.get_id(),
+                                "msg": f"Auction room created, awaiting bidders to join {auction_room.get_min_number_bidders() - auction_room.get_bidder_count()}",
+                            },
+                            message.get("ip"),
+                            message.get("port"),
+                        )
+                    case ClientMessageType.REQ_START_AUCTION.value:
+                        auction_room = self.auction_list.get(message.get("auction_id"))
+                        if auction_room is not None:
+                            threading.Thread(
+                                target=self.auction_process,
+                                args=(auction_room,),
+                                daemon=True,
+                            ).start()
                             response_to_send = (
                                 {
-                                    "type": ClientMessageType.RES_CREATE_AUCTION.value,
+                                    "type": ClientMessageType.RES_START_AUCTION.value,
                                     "id": str(self.server_node._id),
                                     "ip": self.server_node.ip,
                                     "port": self.server_node.port,
-                                    "auction_id": auction_room.get_id(),
-                                    "msg": f"Auction room created, awaiting bidders to join {auction_room.get_min_number_bidders() - auction_room.get_bidder_count()}",
+                                    "status": "Success",
+                                    "message": "Auction started",
                                 },
                                 message.get("ip"),
                                 message.get("port"),
                             )
-                        case ClientMessageType.REQ_START_AUCTION.value:
-                            auction_room = self.auction_list.get(
-                                message.get("auction_id")
+                        else:
+                            response_to_send = (
+                                {
+                                    "type": ClientMessageType.RES_START_AUCTION.value,
+                                    "id": str(self.server_node._id),
+                                    "ip": self.server_node.ip,
+                                    "port": self.server_node.port,
+                                    "status": "Failed",
+                                    "message": "Auction not found",
+                                },
+                                message.get("ip"),
+                                message.get("port"),
                             )
-                            if auction_room is not None:
-                                threading.Thread(
-                                    target=self.auction_process,
-                                    args=(auction_room,),
-                                    daemon=True,
-                                ).start()
-                                response_to_send = (
-                                    {
-                                        "type": ClientMessageType.RES_START_AUCTION.value,
-                                        "id": str(self.server_node._id),
-                                        "ip": self.server_node.ip,
-                                        "port": self.server_node.port,
-                                        "status": "Success",
-                                        "message": "Auction started",
-                                    },
-                                    message.get("ip"),
-                                    message.get("port"),
-                                )
-                            else:
-                                response_to_send = (
-                                    {
-                                        "type": ClientMessageType.RES_START_AUCTION.value,
-                                        "id": str(self.server_node._id),
-                                        "ip": self.server_node.ip,
-                                        "port": self.server_node.port,
-                                        "status": "Failed",
-                                        "message": "Auction not found",
-                                    },
-                                    message.get("ip"),
-                                    message.get("port"),
-                                )
-                        case ClientMessageType.RES_MAKE_BID.value:
-                            self.active_rounds[message.get("auction_id")].add_bid(
-                                message.get("id"), message.get("bid")
-                            )
-                        case _:
-                            logger.info("default case")
+                    case ClientMessageType.RES_MAKE_BID.value:
+                        self.active_rounds[message.get("auction_id")].add_bid(
+                            message.get("id"), message.get("bid")
+                        )
+                    case _:
+                        logger.info("default case")
 
-            # Send response outside the lock to avoid blocking heartbeats
-            if current_state == ServerState.LEADER and response_to_send is not None:
-                self.unicast.send_message(
-                    response_to_send[0], response_to_send[1], response_to_send[2]
-                )
+        # Send response outside the lock to avoid blocking heartbeats
+        if current_state == ServerState.LEADER and response_to_send is not None:
+            self.unicast.send_message(
+                
+            )
 
     def transiton_to_candidate(self):
         with self.state_lock:
             self.term += 1
             self.state = ServerState.CANDIDATE
-            self.voted_for = str(self.server_node._id)
-            id
-            name
-            self.votes_received = {str(self.server_node._id)}
-            self.election_timeout = self._get_random_election_timeout() # should we initialize this only once ? 
+            self.voted_for = self.server_node._id
+            self.votes_received = {self.server_node._id}
+            self.election_timeout = (
+                self._get_random_election_timeout()
+            )  # should we initialize this only once ?
             self.last_heartbeat_time = time.monotonic_ns()
 
         self.send_request_vote()
@@ -820,7 +819,6 @@ class Server:
         return highest_bidder, bids[highest_bidder]
 
 
-
 def parse_arguements():
     parser = argparse.ArgumentParser(
         prog="",
@@ -829,6 +827,7 @@ def parse_arguements():
     parser.add_argument("-n", "--name")
     args = parser.parse_args()
     return args.name
+
 
 if __name__ == "__main__":
     name = parse_arguements()

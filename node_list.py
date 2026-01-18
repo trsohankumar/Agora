@@ -1,7 +1,7 @@
 import threading
-from dataclasses import dataclass, asdict
+from typing import Dict, Optional
+from dataclasses import dataclass, asdict, field
 from utils.common import get_ip_port
-from typing import Dict
 
 
 @dataclass
@@ -13,21 +13,31 @@ class Node:
     _id: str
     ip: str
     port: str
+    last_heartbeat: Optional[int] = field(default_factory=int)
 
     def dict(self):
         return {k: str(v) for k, v in asdict(self).items()}
 
+    @classmethod
+    def from_json(cls, data):
+        """
+        Class method converts data object to Node object
+        """
+        return cls(_id=data.get("_id"), ip=data.get("ip"), port=data.get("port"))
+
+
 class NodeList:
     """
-        This class is responsible to maintain a list of nodes
+    This class is responsible to maintain a list of nodes
     """
+
     def __init__(self):
         self.nodes: Dict[str, Node] = {}
         self.lock = threading.Lock()
 
-    def add_node(self, node_id:str, node_info:Node):
+    def add_node(self, node_id: str, node_info: Node):
         """
-            method adds a node to the node list
+        method adds a node to the node list
         """
         with self.lock:
             if node_id not in self.nodes:
