@@ -1,5 +1,7 @@
 import threading
 from dataclasses import dataclass, asdict
+from utils.common import get_ip_port
+from typing import Dict
 
 
 @dataclass
@@ -15,20 +17,23 @@ class Node:
     def dict(self):
         return {k: str(v) for k, v in asdict(self).items()}
 
-
 class NodeList:
+    """
+        This class is responsible to maintain a list of nodes
+    """
     def __init__(self):
-        self.nodes = {}
+        self.nodes: Dict[str, Node] = {}
         self.lock = threading.Lock()
 
-    def add_node(self, node_id, node_info):
+    def add_node(self, node_id:str, node_info:Node):
+        """
+            method adds a node to the node list
+        """
         with self.lock:
             if node_id not in self.nodes:
                 self.nodes[node_id] = node_info
-                return True
             else:
                 self.nodes[node_id].update(node_info)
-                return False
 
     def get_node(self, node_id):
         with self.lock:

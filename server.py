@@ -1,8 +1,8 @@
+import argparse
 import uuid
 import random
 import time
 import threading
-import json
 
 from loguru import logger
 from enum import Enum
@@ -19,7 +19,6 @@ from log.log_entries import LogEntries
 from utils.common import DisconnectedError, RequestTimeoutError, get_ip_port
 from utils.pending_requests import PendingRequest
 
-
 class ServerState(Enum):
     FOLLOWER = "FOLLOWER"
     CANDIDATE = "CANDIDATE"
@@ -27,24 +26,23 @@ class ServerState(Enum):
 
 
 class Server:
-    def __init__(self):
-        self.server_id = uuid.uuid4()
+    def __init__(self, server_name):
+        ip, port = get_ip_port()
+        self.server_node = Node(_id=str(uuid.uuid5(uuid.NAMESPACE_DNS, server_name)), ip=ip, port=port)
         self.state = ServerState.FOLLOWER
-        self.server_ip, self.server_port = get_ip_port()
         self.peer_list = NodeList()
-        self.client_list = NodeList()
-        logger.info(
-            f"Server starting with id: {self.server_id}, ip: {self.server_ip}, port: {self.server_port}"
-        )
+        self.client_list = NodeList() # will need to be removed
+        logger.info(f"Server starting with id: {self.server_node._id}, ip: {self.server_node.ip}, port: {self.server_node.port}")
 
         # setup message resolver for the server
         self.message_handler = MessageHandler()
         self.discovery_complete = False
         self.register_callbacks()
+
         # setup unicast communication for the server
-        self.unicast = Unicast(unicast_ip=self.server_ip, unicast_port=self.server_port)
+        self.unicast = Unicast(node=self.server_node)
         # setup broadcast communication for the server
-        self.broadcast = Broadcast(self.server_ip)
+        self.broadcast = Broadcast(node=self.server_node)
 
         self.term = 0
         self.voted_for = None
@@ -66,7 +64,7 @@ class Server:
         self.monitor_client_list_thread.start()
 
         self.election_timeout = self._get_random_election_timeout()
-        self.last_heartbeat_time = time.time()
+        self.last_heartbeat_time = time.monotonic_ns()
         self.votes_received = set()
 
         self.auction_list = dict()
@@ -111,7 +109,7 @@ class Server:
 
     def handle_disc_resp(self, msg):
 
-        if msg["id"] == str(self.server_id):
+        if msg["id"] == str(self.server_node._id):
             return
 
         logger.info(f"Handling message: {msg}")
@@ -124,7 +122,7 @@ class Server:
                     self.match_index[msg["id"]] = -1
 
     def handle_disc_req(self, msg):
-        if msg["id"] == str(self.server_id):
+        if msg["id"] == str(self.server_node._id):
             return
         logger.info(f"Handling message: {msg}")
         if self.peer_list.get_node(msg["id"]) == None:
@@ -136,9 +134,9 @@ class Server:
                     self.match_index[msg["id"]] = -1
             return_messge = {
                 "type": ServerMessageType.RES_DISC.value,
-                "ip": self.server_ip,
-                "port": self.server_port,
-                "id": str(self.server_id),
+                "ip": self.server_node.ip,
+                "port": self.server_node.port,
+                "id": str(self.server_node._id),
             }
             self.unicast.send_message(return_messge, msg["ip"], msg["port"])
 
@@ -187,7 +185,7 @@ class Server:
         )
 
     def append_log(self, message):
-        if message["id"] == str(self.server_id):
+        if message["id"] == str(self.server_node._id):
             return
 
         with self.state_lock:
@@ -206,7 +204,7 @@ class Server:
                 if self.state != ServerState.LEADER:
                     continue
                 client_list = self.client_list.get_all_node().copy()
-                current_time = time.time()
+                current_time = time.monotonic_ns()
 
             # Check each client outside the lock to avoid holding it too long
             for client_id, client_info in client_list.items():
@@ -248,22 +246,20 @@ class Server:
                     {
                         "ip": message.get("ip"),
                         "port": message.get("port"),
-                        "last_heartbeat": time.time(),
+                        "last_heartbeat": time.monotonic_ns(),
                     },
                 )
 
     def start_server(self):
+        """
+            method responsible to initialize the server
+        """
         self.message_handler.start_message_handler()
         self.unicast.start_unicast_listen(self.message_handler)
         self.broadcast.start_broadcast_listen(self.message_handler)
-        broadcast_message = {
-            "type": ServerMessageType.REQ_DISC.value,
-            "id": str(self.server_id),
-            "ip": self.server_ip,
-            "port": self.server_port,
-        }
+
         for _ in range(5):
-            self.broadcast.send_broadcast(broadcast_message)
+            self.broadcast.send_broadcast(ServerMessageType.REQ_DISC)
             time.sleep(1)
 
         self.discovery_complete = True
@@ -271,28 +267,36 @@ class Server:
             f"Discovery complete: No of peers found{len(self.peer_list.get_all_node())}"
         )
 
-        self.last_heartbeat_time = time.time()
+        with self.state_lock:
+            self.last_heartbeat_time = time.monotonic_ns()
 
         self.run_server_loop()
 
     def run_server_loop(self):
+        """
+            mesthod responsible for server state transitions
+        """
         while True:
             with self.state_lock:
                 current_state = self.state
-                timeout_since_heartbeat = time.time() - self.last_heartbeat_time
+                time_since_heartbeat = time.monotonic_ns() - self.last_heartbeat_time
+
             if current_state == ServerState.FOLLOWER:
                 if (
                     self.discovery_complete
-                    and timeout_since_heartbeat > self.election_timeout
+                    and time_since_heartbeat > self.election_timeout
                 ):
-                    logger.info("Election timeout occurred")
+                    logger.info(f"Time since last heartbeat: {time_since_heartbeat} greater than election timeout: {self.election_timeout}, election timeout occurred.")
                     self.transiton_to_candidate()
-                time.sleep(self.heartbeat_interval)
+                time.sleep(self.heartbeat_interval) # can be removed later if there is no use
+            
             elif current_state == ServerState.CANDIDATE:
-                if timeout_since_heartbeat > self.election_timeout:
+                if time_since_heartbeat > self.election_timeout:
                     logger.info("Candidate timeout occurred. Starting new election")
                     self.transiton_to_candidate()
+                
                 time.sleep(self.heartbeat_interval)
+                
             elif current_state == ServerState.LEADER:
                 self.send_heartbeat_to_peers()
                 self.send_heartbeat_to_clients()
@@ -337,7 +341,7 @@ class Server:
                                 {
                                     "ip": message.get("ip"),
                                     "port": message.get("port"),
-                                    "last_heartbeat": time.time(),
+                                    "last_heartbeat": time.monotonic_ns(),
                                 },
                             )
 
@@ -348,9 +352,9 @@ class Server:
                                 response_to_send = (
                                     {
                                         "type": ClientMessageType.RES_DISC.value,
-                                        "id": str(self.server_id),
-                                        "ip": self.server_ip,
-                                        "port": self.server_port,
+                                        "id": str(self.server_node._id),
+                                        "ip": self.server_node.ip,
+                                        "port": self.server_node.port,
                                     },
                                     message.get("ip"),
                                     message.get("port"),
@@ -391,9 +395,9 @@ class Server:
                             response_to_send = (
                                 {
                                     "type": ClientMessageType.RES_JOIN_AUCTION.value,
-                                    "id": str(self.server_id),
-                                    "ip": self.server_ip,
-                                    "port": self.server_port,
+                                    "id": str(self.server_node._id),
+                                    "ip": self.server_node.ip,
+                                    "port": self.server_node.port,
                                     "status": status,
                                 },
                                 message.get("ip"),
@@ -407,7 +411,7 @@ class Server:
                                 # Send message to auctioneer and all bidders that auction room is ready
                                 room_enabled_msg = {
                                     "type": ClientMessageType.RES_AUCTION_ROOM_ENABLED.value,
-                                    "id": str(self.server_id),
+                                    "id": str(self.server_node._id),
                                     "message": "Auction room ready",
                                     "status": "Success",
                                 }
@@ -445,9 +449,9 @@ class Server:
                             response_to_send = (
                                 {
                                     "type": ClientMessageType.RES_CREATE_AUCTION.value,
-                                    "id": str(self.server_id),
-                                    "ip": self.server_ip,
-                                    "port": self.server_port,
+                                    "id": str(self.server_node._id),
+                                    "ip": self.server_node.ip,
+                                    "port": self.server_node.port,
                                     "auction_id": auction_room.get_id(),
                                     "msg": f"Auction room created, awaiting bidders to join {auction_room.get_min_number_bidders() - auction_room.get_bidder_count()}",
                                 },
@@ -467,9 +471,9 @@ class Server:
                                 response_to_send = (
                                     {
                                         "type": ClientMessageType.RES_START_AUCTION.value,
-                                        "id": str(self.server_id),
-                                        "ip": self.server_ip,
-                                        "port": self.server_port,
+                                        "id": str(self.server_node._id),
+                                        "ip": self.server_node.ip,
+                                        "port": self.server_node.port,
                                         "status": "Success",
                                         "message": "Auction started",
                                     },
@@ -480,9 +484,9 @@ class Server:
                                 response_to_send = (
                                     {
                                         "type": ClientMessageType.RES_START_AUCTION.value,
-                                        "id": str(self.server_id),
-                                        "ip": self.server_ip,
-                                        "port": self.server_port,
+                                        "id": str(self.server_node._id),
+                                        "ip": self.server_node.ip,
+                                        "port": self.server_node.port,
                                         "status": "Failed",
                                         "message": "Auction not found",
                                     },
@@ -506,10 +510,12 @@ class Server:
         with self.state_lock:
             self.term += 1
             self.state = ServerState.CANDIDATE
-            self.voted_for = str(self.server_id)
-            self.votes_received = {str(self.server_id)}
-            self.election_timeout = self._get_random_election_timeout()
-            self.last_heartbeat_time = time.time()
+            self.voted_for = str(self.server_node._id)
+            id
+            name
+            self.votes_received = {str(self.server_node._id)}
+            self.election_timeout = self._get_random_election_timeout() # should we initialize this only once ? 
+            self.last_heartbeat_time = time.monotonic_ns()
 
         self.send_request_vote()
         self.check_election_won()
@@ -520,9 +526,9 @@ class Server:
             vote_request = {
                 "type": ServerMessageType.REQ_VOTE.value,
                 "term": self.term,
-                "id": str(self.server_id),
-                "ip": self.server_ip,
-                "port": self.server_port,
+                "id": str(self.server_node._id),
+                "ip": self.server_node.ip,
+                "port": self.server_node.port,
                 "last_log_index": len(self.log) - 1,
                 "last_log_term": self.log[-1].term if len(self.log) > 0 else 0,
             }
@@ -536,7 +542,7 @@ class Server:
             total_nodes = len(self.peer_list.get_all_node()) + 1
             if len(self.votes_received) > (total_nodes // 2):
                 logger.info(
-                    f"Server: {self.server_id} has won the election for term: {self.term}"
+                    f"Server: {self.server_node._id} has won the election for term: {self.term}"
                 )
                 self.state = ServerState.LEADER
                 peers = self.peer_list.get_all_node()
@@ -545,7 +551,7 @@ class Server:
                     self.match_index[peer_id] = -1
 
     def handle_request_vote(self, msg):
-        if msg["id"] == str(self.server_id):
+        if msg["id"] == str(self.server_node._id):
             return
         with self.state_lock:
             grant_vote = False
@@ -568,15 +574,15 @@ class Server:
                     if vote_possible:
                         grant_vote = True
                         self.voted_for = msg["id"]
-                        self.last_heartbeat_time = time.time()
+                        self.last_heartbeat_time = time.monotonic_ns()
 
             term = self.term
         vote_response = {
             "type": ServerMessageType.RES_VOTE.value,
-            "id": str(self.server_id),
+            "id": str(self.server_node._id),
             "term": term,
             "vote_granted": grant_vote,
-            "voter_id": str(self.server_id),
+            "voter_id": str(self.server_node._id),
         }
 
         self.unicast.send_message(vote_response, msg["ip"], msg["port"])
@@ -585,7 +591,7 @@ class Server:
         )
 
     def handle_vote_resp(self, msg):
-        if msg["id"] == str(self.server_id):
+        if msg["id"] == str(self.server_node._id):
             return
         with self.state_lock:
             if self.state != ServerState.CANDIDATE or msg["term"] != self.term:
@@ -608,9 +614,9 @@ class Server:
 
         heartbeat_msg = {
             "type": ClientMessageType.SERVER_HEART_BEAT.value,
-            "id": str(self.server_id),
-            "ip": self.server_ip,
-            "port": self.server_port,
+            "id": str(self.server_node._id),
+            "ip": self.server_node.ip,
+            "port": self.server_node.port,
         }
 
         for client_id, client_info in clients.items():
@@ -642,9 +648,9 @@ class Server:
                 heartbeat_msg = {
                     "type": ServerMessageType.REQ_APPEND_ENTRIES.value,
                     "term": self.term,
-                    "id": str(self.server_id),
-                    "ip": self.server_ip,
-                    "port": self.server_port,
+                    "id": str(self.server_node._id),
+                    "ip": self.server_node.ip,
+                    "port": self.server_node.port,
                     "prev_log_index": prev_log_idx,
                     "prev_log_term": prev_log_term,
                     "leader_commit": self.commit_index,
@@ -655,7 +661,7 @@ class Server:
                 )
 
     def handle_append_entries(self, msg):
-        if msg["id"] == str(self.server_id):
+        if msg["id"] == str(self.server_node._id):
             return
 
         with self.state_lock:
@@ -690,14 +696,14 @@ class Server:
                 "type": ServerMessageType.RES_APPEND_ENTRIES.value,
                 "term": self.term,
                 "success": resp,
-                "id": str(self.server_id),
+                "id": str(self.server_node._id),
             }
             self.election_timeout = self._get_random_election_timeout()
-            self.last_heartbeat_time = time.time()
+            self.last_heartbeat_time = time.monotonic_ns()
         self.unicast.send_message(append_entries_response, msg["ip"], msg["port"])
 
     def handle_append_entries_resp(self, msg):
-        if msg["id"] == str(self.server_id):
+        if msg["id"] == str(self.server_node._id):
             return
 
         with self.state_lock:
@@ -814,7 +820,17 @@ class Server:
         return highest_bidder, bids[highest_bidder]
 
 
-if __name__ == "__main__":
 
-    server = Server()
+def parse_arguements():
+    parser = argparse.ArgumentParser(
+        prog="",
+        description="",
+    )
+    parser.add_argument("-n", "--name")
+    args = parser.parse_args()
+    return args.name
+
+if __name__ == "__main__":
+    name = parse_arguements()
+    server = Server(name)
     server.start_server()

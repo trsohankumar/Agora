@@ -1,7 +1,8 @@
 from enum import Enum
+class MessageType(Enum):
+    pass
 
-
-class ClientMessageType(Enum):
+class ClientMessageType(MessageType):
     REQ_DISC = 1
     RES_DISC = 2
     REQ_CREATE_AUCTION = 3
@@ -21,9 +22,7 @@ class ClientMessageType(Enum):
     RES_START_AUCTION = 17
     RES_ROUND_RESULT = 18
     RES_AUCTION_RESULT = 19
-
-
-class ServerMessageType(Enum):
+class ServerMessageType(MessageType):
     REQ_DISC = 100
     RES_DISC = 101
     REQ_VOTE = 102
