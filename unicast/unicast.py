@@ -27,14 +27,14 @@ class Unicast:
 
         unicast_send_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         unicast_send_socket.sendto(
-            json.dumps(self.message.to_json()).encode(), (rec_node.ip, rec_node.port)
+            json.dumps(self.message.to_json()).encode(), (rec_node.ip, int(rec_node.port))
         )
         unicast_send_socket.close()
 
     def _listen_message(self, msg_handler: MessageHandler):
         # will listen for unicast message and when a message is received will add to the messge queue
         unicast_listen_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        unicast_listen_socket.bind(("", self.node.port))
+        unicast_listen_socket.bind(("", int(self.node.port)))
 
         while True:
             data, addr = unicast_listen_socket.recvfrom(65535)

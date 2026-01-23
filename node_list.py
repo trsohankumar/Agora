@@ -12,18 +12,26 @@ class Node:
 
     _id: str
     ip: str
-    port: str
+    port: int
     last_heartbeat: Optional[int] = field(default_factory=int)
 
     def dict(self):
         return {k: str(v) for k, v in asdict(self).items()}
+
+    def copy(self):
+        return Node(_id=self._id, ip=self.ip, port=self.port, last_heartbeat=self.last_heartbeat)
+
+    def update(self, other):
+        self.ip = other.ip
+        self.port = other.port
+        self.last_heartbeat = other.last_heartbeat
 
     @classmethod
     def from_json(cls, data):
         """
         Class method converts data object to Node object
         """
-        return cls(_id=data.get("_id"), ip=data.get("ip"), port=data.get("port"))
+        return cls(_id=data.get("_id"), ip=data.get("ip"), port=int(data.get("port")))
 
 
 class NodeList:

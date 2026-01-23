@@ -8,6 +8,7 @@ from unicast.unicast import Unicast
 from utils.common import get_ip_port, DisconnectedError, RequestTimeoutError
 from message.message_handler import MessageHandler
 from message.message_types import ClientMessageType
+from node_list import Node
 from utils.pending_requests import PendingRequest
 from ui.ui import Ui
 
@@ -20,16 +21,17 @@ class ClientState(Enum):
 class Client:
     def __init__(self):
         self.client_id = str(uuid.uuid4())
-        self.client_ip, self.client_port = get_ip_port()
+        client_ip, client_port = get_ip_port()
+        self.client_node = Node(_id=self.client_id, ip=client_ip, port=client_port)
         self.client_state = ClientState.DISCONNECTED
         self.state_lock = threading.Lock()
-        self.leader_server = None
+        self.leader_server: Node = None
 
-        self.broadcast = Broadcast(self.client_ip)
+        self.broadcast = Broadcast(node=self.client_node)
         self.message_handler = MessageHandler()
         self.register_callbacks()
         self.message_handler.start_message_handler()
-        self.unicast = Unicast(unicast_ip=self.client_ip, unicast_port=self.client_port)
+        self.unicast = Unicast(node=self.client_node)
         self.unicast.start_unicast_listen(self.message_handler)
 
         # Heartbeats
@@ -49,51 +51,48 @@ class Client:
         self.pending_lock = threading.Lock()
 
         logger.info(
-            f"starting client {self.client_id} @ {self.client_ip} {self.client_port}"
+            f"starting client {self.client_id} @ {self.client_node.ip} {self.client_node.port}"
         )
 
-    def _send_request(self, msg, timeout: float = 10.0):
-
-        request_type = msg["type"]
+    def _send_request(self, msg_type, data={}, timeout: float = 10.0):
         pending = PendingRequest()
 
         with self.pending_lock:
-            self.pending_requests[request_type] = pending
+            self.pending_requests[msg_type] = pending
 
         try:
-            self.unicast.send_message(
-                msg, self.leader_server.get("ip"), self.leader_server.get("port")
-            )
+            with self.state_lock:
+                leader = self.leader_server
+            self.unicast.send_message(msg_type, leader, data)
             pending.event.wait(timeout=timeout)
 
             if pending.disconnected:
                 raise DisconnectedError("Not connected to server")
             if pending.response is None:
-                raise RequestTimeoutError(f"Request {request_type} timed out")
+                raise RequestTimeoutError(f"Request {msg_type} timed out")
 
             return pending.response
         finally:
             with self.pending_lock:
-                self.pending_requests.pop(request_type, None)
+                self.pending_requests.pop(msg_type, None)
 
-    def _await_request(self, msg):
-        request_type = msg["type"]
+    def _await_request(self, msg_type):
         pending = PendingRequest()
 
         with self.pending_lock:
-            self.pending_requests[request_type] = pending
+            self.pending_requests[msg_type] = pending
 
         try:
             pending.event.wait()
             if pending.disconnected:
                 raise DisconnectedError("Not connected to server")
             if pending.response is None:
-                raise RequestTimeoutError(f"Request {request_type} timed out")
+                raise RequestTimeoutError(f"Request {msg_type} timed out")
 
             return pending.response
         finally:
             with self.pending_lock:
-                self.pending_requests.pop(request_type, None)
+                self.pending_requests.pop(msg_type, None)
 
     def _complete_request(self, request_type, response):
         with self.pending_lock:
@@ -137,25 +136,16 @@ class Client:
 
     def discover_leader(self, message):
         with self.state_lock:
-            logger.info("leader found at %s %s", message["ip"], message["port"])
-            self.leader_server = {
-                "id": message["id"],
-                "ip": message["ip"],
-                "port": message["port"],
-            }
-
+            logger.info(
+                "leader found at %s %s", message.sender.ip, message.sender.port
+            )
+            self.leader_server = message.sender
             self.client_state = ClientState.CONNECTED
 
     def search_for_leader(self):
         with self.state_lock:
             logger.info("searching for leader")
-            client_message = {
-                "type": ClientMessageType.REQ_DISC.value,
-                "id": str(self.client_id),
-                "ip": self.client_ip,
-                "port": self.client_port,
-            }
-        self.broadcast.send_broadcast(client_message)
+        self.broadcast.send_broadcast(ClientMessageType.REQ_DISC.value)
         time.sleep(1)
 
     def start_client(self):
@@ -203,14 +193,14 @@ class Client:
     def _handle_auction_list_response(self, msg):
         self._complete_request(
             ClientMessageType.REQ_RETRIEVE_AUCTION_LIST.value,
-            msg.get("available_auctions"),
+            msg.data.get("available_auctions"),
         )
 
     def _handle_join_auction_response(self, msg):
-        self._complete_request(ClientMessageType.REQ_JOIN_AUCTION.value, msg)
+        self._complete_request(ClientMessageType.REQ_JOIN_AUCTION.value, msg.data)
 
     def _handle_create_auction_response(self, msg):
-        self._complete_request(ClientMessageType.REQ_CREATE_AUCTION.value, msg)
+        self._complete_request(ClientMessageType.REQ_CREATE_AUCTION.value, msg.data)
 
     def send_heartbeat(self):
         """Send periodic heartbeats to server (no response expected)"""
@@ -221,19 +211,14 @@ class Client:
                     self.client_state == ClientState.CONNECTED
                     and self.leader_server is not None
                 ):
-                    msg = {
-                        "type": ClientMessageType.CLIENT_HEART_BEAT.value,
-                        "id": self.client_id,
-                        "ip": self.client_ip,
-                        "port": self.client_port,
-                    }
-                    leader_ip = self.leader_server.get("ip")
-                    leader_port = self.leader_server.get("port")
+                    leader = self.leader_server
                 else:
                     continue
 
             # Send message outside the lock (no response expected)
-            self.unicast.send_message(msg, ip=leader_ip, port=leader_port)
+            self.unicast.send_message(
+                ClientMessageType.CLIENT_HEART_BEAT.value, leader
+            )
 
     def recv_server_heartbeat(self, message):
         """Receive heartbeat from server (no response needed)"""
@@ -242,108 +227,65 @@ class Client:
             self.last_heartbeat_time = time.time()
 
             # Update leader info if it changed
-            if self.leader_server is None or self.leader_server.get(
-                "id"
-            ) != message.get("id"):
-                self.leader_server = {
-                    "id": message.get("id"),
-                    "ip": message.get("ip"),
-                    "port": message.get("port"),
-                }
-                logger.info(f"Updated leader info from heartbeat: {message.get('id')}")
+            if self.leader_server is None or self.leader_server._id != message.sender._id:
+                self.leader_server = message.sender
+                logger.info(f"Updated leader info from heartbeat: {message.sender._id}")
 
     def get_auctions_list(self):
-        with self.state_lock:
-            msg = {
-                "type": ClientMessageType.REQ_RETRIEVE_AUCTION_LIST.value,
-                "id": self.client_id,
-                "ip": self.client_ip,
-                "port": self.client_port,
-            }
-
-        return self._send_request(msg)
+        return self._send_request(ClientMessageType.REQ_RETRIEVE_AUCTION_LIST.value)
 
     def create_new_auction(
         self, item: str, min_bid_amt: int, min_bidders: int, no_of_rounds: int
     ):
-        with self.state_lock:
-            msg = {
-                "type": ClientMessageType.REQ_CREATE_AUCTION.value,
-                "id": self.client_id,
-                "ip": self.client_ip,
-                "port": self.client_port,
-                "item": item,
-                "min_bid": min_bid_amt,
-                "min_bidders": min_bidders,
-                "rounds": no_of_rounds,
-            }
-
-        return self._send_request(msg=msg)
+        data = {
+            "item": item,
+            "min_bid": min_bid_amt,
+            "min_bidders": min_bidders,
+            "rounds": no_of_rounds,
+        }
+        return self._send_request(ClientMessageType.REQ_CREATE_AUCTION.value, data)
 
     def await_make_bid(self):
-        msg = {"type": ClientMessageType.REQ_MAKE_BID.value}
-        return self._await_request(msg)
+        return self._await_request(ClientMessageType.REQ_MAKE_BID.value)
 
     def await_round_result(self):
-        msg = {"type": ClientMessageType.RES_ROUND_RESULT.value}
-        return self._await_request(msg)
+        return self._await_request(ClientMessageType.RES_ROUND_RESULT.value)
 
     def make_bid(self, auction_id, bid):
         with self.state_lock:
-            msg = {
-                "type": ClientMessageType.RES_MAKE_BID.value,
-                "auction_id": auction_id,
-                "bid": bid,
-                "id": self.client_id,
-                "ip": self.client_ip,
-                "port": self.client_port,
-            }
-            (ip, port) = (self.leader_server.get("ip"), self.leader_server.get("port"))
-        self.unicast.send_message(msg, ip, port)
+            leader = self.leader_server
+        self.unicast.send_message(
+            ClientMessageType.RES_MAKE_BID.value,
+            leader,
+            {"auction_id": auction_id, "bid": bid},
+        )
 
     def join_auction(self, auction_id):
-        with self.state_lock:
-            msg = {
-                "type": ClientMessageType.REQ_JOIN_AUCTION.value,
-                "id": self.client_id,
-                "ip": self.client_ip,
-                "port": self.client_port,
-                "auction_id": auction_id,
-            }
-
-        return self._send_request(msg)
+        return self._send_request(
+            ClientMessageType.REQ_JOIN_AUCTION.value, {"auction_id": auction_id}
+        )
 
     def _handle_auction_room_enabled(self, msg):
-        if msg.get("status") == "Success":
+        if msg.data.get("status") == "Success":
             with self.state_lock:
                 self.is_auction_room_enabled = True
 
     def start_auction(self, auction_id):
-        with self.state_lock:
-            msg = {
-                "type": ClientMessageType.REQ_START_AUCTION.value,
-                "id": self.client_id,
-                "auction_id": auction_id,
-                "ip": self.client_ip,
-                "port": self.client_port,
-            }
-        return self._send_request(msg)
+        return self._send_request(
+            ClientMessageType.REQ_START_AUCTION.value, {"auction_id": auction_id}
+        )
 
     def _handle_make_bid(self, msg):
-        self._complete_request(ClientMessageType.REQ_MAKE_BID.value, msg)
+        self._complete_request(ClientMessageType.REQ_MAKE_BID.value, msg.data)
 
     def _handle_start_auction_result(self, msg):
-        self._complete_request(ClientMessageType.REQ_START_AUCTION.value, msg)
+        self._complete_request(ClientMessageType.REQ_START_AUCTION.value, msg.data)
 
     def _handle_round_result(self, msg):
-        self._complete_request(ClientMessageType.RES_ROUND_RESULT.value, msg)
+        self._complete_request(ClientMessageType.RES_ROUND_RESULT.value, msg.data)
 
 
 def main():
-    # 1. broadcasts itself to the network
-    # 2. awaits response from leader
-    # 3. starts heartbeat to leader
-    # 4. no response from leader -> broadcast
     client = Client()
 
     ui = Ui(client=client)

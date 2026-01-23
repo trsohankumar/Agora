@@ -31,12 +31,12 @@ class Broadcast:
             sender=self.node,
         )
 
-        broadcast_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) 
+        broadcast_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         broadcast_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 
         logger.info(f"Sending broadcast on ip:{self.broadcast_address}, port: {self.broadcast_port}")
 
-        broadcast_sock.sendto(json.dumps(message).encode(), (self.broadcast_address, self.broadcast_port))
+        broadcast_sock.sendto(json.dumps(message.to_json()).encode(), (self.broadcast_address, self.broadcast_port))
         broadcast_sock.close()
 
     def _listen_broadcast(self, message_queue: MessageHandler):
@@ -46,8 +46,8 @@ class Broadcast:
         broadcast_listen_sock.bind(('', self.broadcast_port))
         logger.info(f"Started listening for broadcast on ip:{self.broadcast_address}, port: {self.broadcast_port}")
         while True:
-            data, addr = broadcast_listen_sock.recvfrom(self.broadcast_recv_buffer_size)
-            msg = json.loads(data.decode())
-            message_queue.add_message(msg)
+            data, _ = broadcast_listen_sock.recvfrom(self.broadcast_recv_buffer_size)
+            message = Message.from_json(json.loads(data.decode()))
+            message_queue.add_message(message)
 
         broadcast_listen_sock.close()
