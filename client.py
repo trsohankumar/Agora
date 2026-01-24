@@ -22,6 +22,7 @@ class Client:
     def __init__(self):
         self.client_id = str(uuid.uuid4())
         client_ip, client_port = get_ip_port()
+        client_port = 9100
         self.client_node = Node(_id=self.client_id, ip=client_ip, port=client_port)
         self.client_state = ClientState.DISCONNECTED
         self.state_lock = threading.Lock()
@@ -136,7 +137,9 @@ class Client:
 
     def discover_leader(self, message):
         with self.state_lock:
-            logger.info("leader found at %s %s", message.sender.ip, message.sender.port)
+            logger.info(
+                f"leader found at ip: {message.sender.ip}, port: {message.sender.port}"
+            )
             self.leader_server = message.sender
             self.client_state = ClientState.CONNECTED
 
@@ -203,18 +206,16 @@ class Client:
     def send_heartbeat(self):
         """Send periodic heartbeats to server (no response expected)"""
         while True:
-            time.sleep(self.heartbeat_interval)
             with self.state_lock:
-                if (
-                    self.client_state == ClientState.CONNECTED
-                    and self.leader_server is not None
-                ):
+                if self.client_state == ClientState.CONNECTED:
                     leader = self.leader_server
                 else:
                     continue
 
+            logger.debug("Sending heartbeat to leader")
             # Send message outside the lock (no response expected)
             self.unicast.send_message(ClientMessageType.CLIENT_HEART_BEAT.value, leader)
+            time.sleep(self.heartbeat_interval)
 
     def recv_server_heartbeat(self, message):
         """Receive heartbeat from server (no response needed)"""
