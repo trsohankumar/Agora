@@ -71,6 +71,11 @@ class Server:
         self.monitor_client_list_thread = threading.Thread(
             target=self.remove_timeout_client_from_list, daemon=True
         )
+
+        self.follower_heartbeat_thread = threading.Thread(
+            target=self.send_heartbeat_to_peers, daemon=True
+        )
+
         self.monitor_client_list_thread.start()
 
         self.election_timeout = self._get_random_election_timeout()
@@ -328,7 +333,7 @@ class Server:
                     self.transiton_to_candidate()
 
             elif current_state == ServerState.LEADER:
-                self.send_heartbeat_to_peers()
+                # self.send_heartbeat_to_peers()
                 self.send_heartbeat_to_clients()
 
             self._commit_log()
@@ -635,40 +640,47 @@ class Server:
 
     def send_heartbeat_to_peers(self):
         """Send heartbeat/log replication to peer servers"""
-        peers = self.peer_list.get_all_node()
+        messages = []
 
-        with self.state_lock:
-            for peer_id, peer_info in peers.items():
-                # edge case to be handled
-                prev_log_idx = self.next_index[peer_id] - 1
-                prev_log_term = 0
-                if prev_log_idx >= 0 and prev_log_idx < len(self.log):
-                    prev_log_term = self.log[prev_log_idx].term
+        while True:
+            with self.state_lock:
+                if self.state != ServerState.LEADER:
+                    return
 
-                # Convert LogEntries to dicts for JSON serialization
-                # Limit entries per message to avoid UDP size limits (typically 65KB)
-                max_entries_per_msg = 10
-                start_idx = self.next_index.get(peer_id)
-                end_idx = min(start_idx + max_entries_per_msg, len(self.log))
-                entries_to_send = [
-                    entry.to_dict() for entry in self.log[start_idx:end_idx]
-                ]
+                peers = self.peer_list.get_all_node()
+                for peer_id, peer_info in peers.items():
+                    prev_log_idx = self.next_index[peer_id] - 1
+                    prev_log_term = 0
+                    if prev_log_idx >= 0 and prev_log_idx < len(self.log):
+                        prev_log_term = self.log[prev_log_idx].term
 
-                data = {
-                    "term": self.term,
-                    "prev_log_index": prev_log_idx,
-                    "prev_log_term": prev_log_term,
-                    "leader_commit": self.commit_index,
-                    "entries": entries_to_send,
-                }
-                self._send_message(
-                    Message(
-                        message_type=ServerMessageType.REQ_APPEND_ENTRIES.value,
-                        sender=self.server_node,
-                        receiver=peer_info,
-                        data=data,
+                    max_entries_per_msg = 10
+                    start_idx = self.next_index.get(peer_id)
+                    end_idx = min(start_idx + max_entries_per_msg, len(self.log))
+                    entries_to_send = [
+                        entry.to_dict() for entry in self.log[start_idx:end_idx]
+                    ]
+
+                    data = {
+                        "term": self.term,
+                        "prev_log_index": prev_log_idx,
+                        "prev_log_term": prev_log_term,
+                        "leader_commit": self.commit_index,
+                        "entries": entries_to_send,
+                    }
+                    messages.append(
+                        Message(
+                            message_type=ServerMessageType.REQ_APPEND_ENTRIES.value,
+                            sender=self.server_node,
+                            receiver=peer_info,
+                            data=data,
+                        )
                     )
-                )
+
+            for msg in messages:
+                self._send_message(msg)
+
+            time.sleep(self.heartbeat_interval)
 
     def handle_append_entries(self, msg):
         if msg.sender._id == str(self.server_node._id):
