@@ -338,6 +338,7 @@ class Server:
                     self.transiton_to_candidate()
 
             self._commit_log()
+            time.sleep(self.heartbeat_interval + 1)
 
     def _send_leader_message(self, msg):
         if self.state == ServerState.LEADER:
