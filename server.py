@@ -75,9 +75,13 @@ class Server:
         self.follower_heartbeat_thread = threading.Thread(
             target=self.send_heartbeat_to_peers, daemon=True
         )
+        self.client_heartbeat_thread = threading.Thread(
+            target=self.send_heartbeat_to_clients, daemon=True
+        )
 
         self.monitor_client_list_thread.start()
         self.follower_heartbeat_thread.start()
+        self.client_heartbeat_thread.start()
 
         self.election_timeout = self._get_random_election_timeout()
         self.last_heartbeat_time = time.time()
@@ -333,12 +337,7 @@ class Server:
                     logger.info("Candidate timeout occurred. Starting new election")
                     self.transiton_to_candidate()
 
-            elif current_state == ServerState.LEADER:
-                # self.send_heartbeat_to_peers()
-                self.send_heartbeat_to_clients()
-
             self._commit_log()
-            time.sleep(self.heartbeat_interval)
 
     def _send_leader_message(self, msg):
         if self.state == ServerState.LEADER:
@@ -625,19 +624,22 @@ class Server:
 
     def send_heartbeat_to_clients(self):
         """Send heartbeat to all connected clients (unidirectional - no response expected)"""
-        with self.state_lock:
-            if self.state != ServerState.LEADER:
-                return
-            clients = self.client_list.get_all_node().copy()
+        while True:
+            with self.state_lock:
+                if self.state != ServerState.LEADER:
+                    time.sleep(self.heartbeat_interval)
+                    continue
+                clients = self.client_list.get_all_node().copy()
 
-        for client_id, client_info in clients.items():
-            self._send_leader_message(
-                Message(
-                    message_type=ClientMessageType.SERVER_HEART_BEAT.value,
-                    sender=self.server_node,
-                    receiver=client_info,
+            for _, client_info in clients.items():
+                self._send_leader_message(
+                    Message(
+                        message_type=ClientMessageType.SERVER_HEART_BEAT.value,
+                        sender=self.server_node,
+                        receiver=client_info,
+                    )
                 )
-            )
+            time.sleep(self.heartbeat_interval)
 
     def send_heartbeat_to_peers(self):
         """Send heartbeat/log replication to peer servers"""
