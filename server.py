@@ -65,7 +65,7 @@ class Server:
         self.match_index = {}
 
         self.state_lock = threading.Lock()
-        self.heartbeat_interval = 0.015  # Match client's heartbeat interval (100ms)
+        self.heartbeat_interval = 0.150  # Match client's heartbeat interval (100ms)
         # Client sends every 0.1s, so timeout should be longer (e.g., 5-6 missed heartbeats)
         self.client_heartbeat_timeout = 1.0  # Increased to match new interval
         self.monitor_client_list_thread = threading.Thread(
@@ -126,7 +126,7 @@ class Server:
             pending.event.set()
 
     def _get_random_election_timeout(self):
-        return random.uniform(0.15, 0.3)  # 150-300ms in seconds
+        return random.uniform(1, 2.1)
 
     def handle_disc_resp(self, msg):
         """
