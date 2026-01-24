@@ -250,7 +250,6 @@ class Server:
         # Track clients we've already queued for removal
         while True:
             # Check less frequently than the timeout period
-            time.sleep(self.heartbeat_interval)
 
             with self.state_lock:
                 if self.state != ServerState.LEADER:
@@ -261,6 +260,7 @@ class Server:
 
             for client_id, client_info in client_list.items():
                 last_heartbeat = client_info.last_heartbeat
+                logger.info(client_info.last_heartbeat)
                 if current_time - last_heartbeat > self.client_heartbeat_timeout:
                     # Only log removal once per client
                     if client_id not in clients_pending_removal:
@@ -275,6 +275,8 @@ class Server:
                         with self.state_lock:
                             self.log.append(LogEntries(self.term, message))
 
+            time.sleep(self.client_heartbeat_timeout)
+
     def handle_client_heartbeat(self, message):
         """
         Handle heartbeat from client (unidirectional - no response sent).
@@ -287,7 +289,8 @@ class Server:
             client = self.client_list.get_node(message.sender._id)
             if client is not None:
                 # Update heartbeat timestamp for known clients
-                self.client_list.add_node(message.sender._id, message.sender)
+                client.last_heartbeat = time.time()
+                # self.client_list.add_node(message.≥sender._id, messagesender)
 
     def start_server(self):
         """
