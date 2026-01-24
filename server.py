@@ -77,6 +77,7 @@ class Server:
         )
 
         self.monitor_client_list_thread.start()
+        self.follower_heartbeat_thread.start()
 
         self.election_timeout = self._get_random_election_timeout()
         self.last_heartbeat_time = time.time()
@@ -640,12 +641,13 @@ class Server:
 
     def send_heartbeat_to_peers(self):
         """Send heartbeat/log replication to peer servers"""
-        messages = []
 
         while True:
+            messages = []
             with self.state_lock:
                 if self.state != ServerState.LEADER:
-                    return
+                    time.sleep(self.heartbeat_interval)
+                    continue
 
                 peers = self.peer_list.get_all_node()
                 for peer_id, peer_info in peers.items():
