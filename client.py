@@ -35,7 +35,7 @@ class Client:
         self.unicast.start_unicast_listen(self.message_handler)
 
         # Heartbeats
-        self.heartbeat_interval = 0.1
+        self.heartbeat_interval = 0.250
         self.heartbeat_timeout = 2.0
         self.last_heartbeat_time = time.time()
         self.req_heartbeat_thread = threading.Thread(
@@ -136,9 +136,7 @@ class Client:
 
     def discover_leader(self, message):
         with self.state_lock:
-            logger.info(
-                "leader found at %s %s", message.sender.ip, message.sender.port
-            )
+            logger.info("leader found at %s %s", message.sender.ip, message.sender.port)
             self.leader_server = message.sender
             self.client_state = ClientState.CONNECTED
 
@@ -216,9 +214,7 @@ class Client:
                     continue
 
             # Send message outside the lock (no response expected)
-            self.unicast.send_message(
-                ClientMessageType.CLIENT_HEART_BEAT.value, leader
-            )
+            self.unicast.send_message(ClientMessageType.CLIENT_HEART_BEAT.value, leader)
 
     def recv_server_heartbeat(self, message):
         """Receive heartbeat from server (no response needed)"""
@@ -227,7 +223,10 @@ class Client:
             self.last_heartbeat_time = time.time()
 
             # Update leader info if it changed
-            if self.leader_server is None or self.leader_server._id != message.sender._id:
+            if (
+                self.leader_server is None
+                or self.leader_server._id != message.sender._id
+            ):
                 self.leader_server = message.sender
                 logger.info(f"Updated leader info from heartbeat: {message.sender._id}")
 

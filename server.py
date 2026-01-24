@@ -67,7 +67,7 @@ class Server:
         self.state_lock = threading.Lock()
         self.heartbeat_interval = 0.150  # Match client's heartbeat interval (100ms)
         # Client sends every 0.1s, so timeout should be longer (e.g., 5-6 missed heartbeats)
-        self.client_heartbeat_timeout = 1.0  # Increased to match new interval
+        self.client_heartbeat_timeout = 3.0  # Increased to match new interval
         self.monitor_client_list_thread = threading.Thread(
             target=self.remove_timeout_client_from_list, daemon=True
         )
