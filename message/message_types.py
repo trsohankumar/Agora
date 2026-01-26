@@ -1,6 +1,9 @@
 from enum import Enum
+
+
 class MessageType(Enum):
     pass
+
 
 class ClientMessageType(MessageType):
     REQ_DISC = 1
@@ -22,10 +25,18 @@ class ClientMessageType(MessageType):
     RES_START_AUCTION = 17
     RES_ROUND_RESULT = 18
     RES_AUCTION_RESULT = 19
+
+
 class ServerMessageType(MessageType):
+    # Discovery
     REQ_DISC = 100
     RES_DISC = 101
-    REQ_VOTE = 102
-    RES_VOTE = 103
-    REQ_APPEND_ENTRIES = 104
-    RES_APPEND_ENTRIES = 105
+    # Bully Algorithm messages
+    ELECTION = 102      # Sent to higher-ID nodes to start election
+    ALIVE = 103         # Response to ELECTION - "I'm alive, back off"
+    COORDINATOR = 104   # Broadcast by new leader to announce victory
+    # State Replication
+    STATE_SYNC = 105    # Leader sends state to followers
+    STATE_ACK = 106     # Follower acknowledges state sync
+    # Heartbeat
+    HEARTBEAT = 107     # Leader heartbeat to followers

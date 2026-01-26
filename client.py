@@ -21,8 +21,7 @@ class ClientState(Enum):
 class Client:
     def __init__(self):
         self.client_id = str(uuid.uuid4())
-        client_ip, client_port = get_ip_port()
-        client_port = 9100
+        client_ip, client_port = get_ip_port() 
         self.client_node = Node(_id=self.client_id, ip=client_ip, port=client_port)
         self.client_state = ClientState.DISCONNECTED
         self.state_lock = threading.Lock()
@@ -104,6 +103,10 @@ class Client:
             pending.event.set()
 
     def register_callbacks(self):
+        # Ignore own broadcast messages
+        self.message_handler.register_handler(
+            ClientMessageType.REQ_DISC.value, lambda _: None
+        )
         self.message_handler.register_handler(
             ClientMessageType.RES_DISC.value, self.discover_leader
         )
@@ -142,6 +145,7 @@ class Client:
             )
             self.leader_server = message.sender
             self.client_state = ClientState.CONNECTED
+            self.last_heartbeat_time = time.time()  # Reset heartbeat timer on reconnect
 
     def search_for_leader(self):
         with self.state_lock:
@@ -160,9 +164,11 @@ class Client:
                     and time_since_heartbeat > self.heartbeat_timeout
                 )
 
-                if should_disconnect:
-                    logger.warning(f"Heartbeat timeout")
-                    self._on_disconnect()
+            # Call _on_disconnect outside the lock to avoid deadlock
+            if should_disconnect:
+                logger.warning("Heartbeat timeout")
+                self._on_disconnect()
+                current_state = ClientState.DISCONNECTED
 
             if current_state == ClientState.DISCONNECTED:
                 self.search_for_leader()
@@ -206,16 +212,16 @@ class Client:
     def send_heartbeat(self):
         """Send periodic heartbeats to server (no response expected)"""
         while True:
-            with self.state_lock:
-                if self.client_state == ClientState.CONNECTED:
-                    leader = self.leader_server
-                else:
-                    continue
-
-            logger.debug("Sending heartbeat to leader")
-            # Send message outside the lock (no response expected)
-            self.unicast.send_message(ClientMessageType.CLIENT_HEART_BEAT.value, leader)
             time.sleep(self.heartbeat_interval)
+
+            with self.state_lock:
+                if self.client_state != ClientState.CONNECTED:
+                    continue
+                leader = self.leader_server
+
+            # Send message outside the lock (no response expected)
+            if leader is not None:
+                self.unicast.send_message(ClientMessageType.CLIENT_HEART_BEAT.value, leader)
 
     def recv_server_heartbeat(self, message):
         """Receive heartbeat from server (no response needed)"""

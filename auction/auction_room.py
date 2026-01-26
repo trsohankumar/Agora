@@ -55,17 +55,23 @@ class AuctionRoom:
         self.bidders.add_node(participant_id, participant)
 
     def to_json(self):
+        # Serialize bidders properly
+        bidders_dict = {}
+        for bidder_id, bidder_node in self.bidders.get_all_node().items():
+            bidders_dict[bidder_id] = bidder_node.dict()
+
         return {
             'id': str(self._id),
             'auctioneer': self.auctioneer.dict(),
-            'bidders': self.bidders.get_all_node(),
+            'bidders': bidders_dict,
             'status': self.status.value if self.status else None,
             'rounds': self.rounds,
             'round_timeout': self.round_timeout,
             'item': self.item,
             'min_bid': self.min_bid,
             'max_bid': self.max_bid,
-            'max_bidder': self.max_bidder
+            'max_bidder': self.max_bidder,
+            'min_number_of_bidders': self.min_number_of_bidders,
         }
     
     def get_id(self):
@@ -88,3 +94,28 @@ class AuctionRoom:
 
     def get_rounds(self):
         return self.rounds
+
+    @classmethod
+    def from_json(cls, data):
+        """Create an AuctionRoom from JSON data"""
+        auctioneer = Node.from_json(data.get("auctioneer"))
+        room = cls(
+            auctioneer=auctioneer,
+            rounds=data.get("rounds"),
+            item=data.get("item"),
+            min_bid=data.get("min_bid"),
+            min_bidders=data.get("min_number_of_bidders", 2),
+        )
+        room._id = data.get("id")
+        room.status = AuctionRoomStatus(data.get("status", 0))
+        room.max_bid = data.get("max_bid", 0)
+        room.max_bidder = data.get("max_bidder")
+
+        # Restore bidders
+        bidders_data = data.get("bidders", {})
+        for bidder_id, bidder_info in bidders_data.items():
+            if isinstance(bidder_info, dict):
+                bidder_node = Node.from_json(bidder_info)
+                room.bidders.add_node(bidder_id, bidder_node)
+
+        return room
