@@ -18,7 +18,7 @@ from message.message_types import ServerMessageType, ClientMessageType
 from message.message import Message
 from node_list import NodeList, Node
 from log.log_entries import LogEntries
-from utils.common import DisconnectedError, RequestTimeoutError, get_ip_port
+from utils.common import DisconnectedError, RequestTimeoutError, get_ip_port, get_uuid_int
 from utils.pending_requests import PendingRequest
 
 
@@ -31,59 +31,54 @@ class ServerState(Enum):
 class Server:
     def __init__(self, server_name, port):
         ip, _ = get_ip_port()
-
         self.server_node = Node(
             _id=str(uuid.uuid5(uuid.NAMESPACE_DNS, server_name)), ip=ip, port=port
         )
-        self.state = ServerState.FOLLOWER
+        self.priority = get_uuid_int(self.server_node._id)
+        
+        # election variables
+        self.ok_received = False
+        self.leader = None
+        self.state = ServerState.CANDIDATE
+        self.election_timeout = 3.0
+        
         self.peer_list = NodeList()
         self.client_list = NodeList()  # will need to be removed
         logger.info(
             f"Server starting with id: {self.server_node._id}, ip: {self.server_node.ip}, port: {self.server_node.port}"
         )
+        self.discovery_complete = False
 
         # setup message resolver for the server
         self.message_handler = MessageHandler()
-
-        self.discovery_complete = False
         self.register_callbacks()
-
         # setup unicast communication for the server
         self.unicast = Unicast(node=self.server_node)
         self.outgoing_handler = OutgoingMessageHandler(self.unicast)
         # setup broadcast communication for the server
         self.broadcast = Broadcast(node=self.server_node)
 
-        self.term = 0
-        self.voted_for = None
-        self.log = []
-
-        self.commit_index = 0
-        self.last_applied = -1
-
-        self.next_index = {}
-        self.match_index = {}
 
         self.state_lock = threading.Lock()
         self.heartbeat_interval = 0.150  # Match client's heartbeat interval (100ms)
         # Client sends every 0.1s, so timeout should be longer (e.g., 5-6 missed heartbeats)
-        self.client_heartbeat_timeout = 3.0  # Increased to match new interval
-        self.monitor_client_list_thread = threading.Thread(
-            target=self.remove_timeout_client_from_list, daemon=True
-        )
+        # self.client_heartbeat_timeout = 3.0  # Increased to match new interval
+        # self.monitor_client_list_thread = threading.Thread(
+        #     target=self.remove_timeout_client_from_list, daemon=True
+        # )
 
         self.follower_heartbeat_thread = threading.Thread(
             target=self.send_heartbeat_to_peers, daemon=True
         )
-        self.client_heartbeat_thread = threading.Thread(
-            target=self.send_heartbeat_to_clients, daemon=True
-        )
+        # self.client_heartbeat_thread = threading.Thread(
+        #     target=self.send_heartbeat_to_clients, daemon=True
+        # )
 
-        self.monitor_client_list_thread.start()
+        # self.monitor_client_list_thread.start()
         self.follower_heartbeat_thread.start()
-        self.client_heartbeat_thread.start()
+        # self.client_heartbeat_thread.start()
 
-        self.election_timeout = self._get_random_election_timeout()
+        # self.election_timeout = self._get_random_election_timeout()
         self.last_heartbeat_time = time.time()
         self.votes_received = set()
 
@@ -197,35 +192,39 @@ class Server:
             ServerMessageType.RES_VOTE.value, self.handle_vote_resp
         )
         self.message_handler.register_handler(
+            ServerMessageType.COORDINATE.value, self.handle_coordinate_msg
+        )
+        self.message_handler.register_handler(
             ServerMessageType.REQ_APPEND_ENTRIES.value, self.handle_append_entries
         )
         self.message_handler.register_handler(
             ServerMessageType.RES_APPEND_ENTRIES.value, self.handle_append_entries_resp
         )
 
+
         # Client messages sent to server
-        self.message_handler.register_handler(
-            ClientMessageType.REQ_DISC.value, self.append_log
-        )
-        self.message_handler.register_handler(
-            ClientMessageType.REQ_JOIN_AUCTION.value, self.append_log
-        )
-        self.message_handler.register_handler(
-            ClientMessageType.REQ_CREATE_AUCTION.value, self.append_log
-        )
-        self.message_handler.register_handler(
-            ClientMessageType.REQ_START_AUCTION.value, self.append_log
-        )
-        self.message_handler.register_handler(
-            ClientMessageType.RES_MAKE_BID.value, self.append_log
-        )
-        self.message_handler.register_handler(
-            ClientMessageType.CLIENT_HEART_BEAT.value, self.handle_client_heartbeat
-        )
-        self.message_handler.register_handler(
-            ClientMessageType.REQ_RETRIEVE_AUCTION_LIST.value,
-            self.handle_retrieve_auction_list_req,
-        )
+        # self.message_handler.register_handler(
+        #     ClientMessageType.REQ_DISC.value, self.append_log
+        # )
+        # self.message_handler.register_handler(
+        #     ClientMessageType.REQ_JOIN_AUCTION.value, self.append_log
+        # )
+        # self.message_handler.register_handler(
+        #     ClientMessageType.REQ_CREATE_AUCTION.value, self.append_log
+        # )
+        # self.message_handler.register_handler(
+        #     ClientMessageType.REQ_START_AUCTION.value, self.append_log
+        # )
+        # self.message_handler.register_handler(
+        #     ClientMessageType.RES_MAKE_BID.value, self.append_log
+        # )
+        # self.message_handler.register_handler(
+        #     ClientMessageType.CLIENT_HEART_BEAT.value, self.handle_client_heartbeat
+        # )
+        # self.message_handler.register_handler(
+        #     ClientMessageType.REQ_RETRIEVE_AUCTION_LIST.value,
+        #     self.handle_retrieve_auction_list_req,
+        # )
 
     def append_log(self, msg):
         """
@@ -312,12 +311,12 @@ class Server:
 
         with self.state_lock:
             self.last_heartbeat_time = time.time()
-
+            logger.info("Server starting in {}", self.state)
         self.run_server_loop()
 
     def run_server_loop(self):
         """
-        mesthod responsible for server state transitions
+            server loop method: loops over the three Server states over time
         """
         while True:
             with self.state_lock:
@@ -333,15 +332,54 @@ class Server:
                     logger.info(
                         f"Time since last heartbeat: {time_since_heartbeat} greater than election timeout: {self.election_timeout}, election timeout occurred."
                     )
-                    self.transiton_to_candidate()
+                    with self.state_lock:
+                        self.state = ServerState.CANDIDATE
 
             elif current_state == ServerState.CANDIDATE:
                 if time_since_heartbeat > self.election_timeout:
                     logger.info("Candidate timeout occurred. Starting new election")
-                    self.transiton_to_candidate()
+                    self.start_bully_election()
+                    
+            elif current_state == ServerState.LEADER:
+                logger.info("Leader elected")
 
-            self._commit_log()
             time.sleep(self.heartbeat_interval + 1)
+
+    def check_time_out(self):
+        with self.state_lock:
+            if self.state == ServerState.CANDIDATE and not self.ok_received:
+                self.state = ServerState.LEADER
+        self.send_coordinate()
+
+    def start_bully_election(self):
+        higher_priority_peers = []
+        for peer_id, peer in self.peer_list.get_all_node().items():
+            if get_uuid_int(peer_id) > self.priority:
+                higher_priority_peers.append(peer)
+        
+        for peer in higher_priority_peers:
+            self._send_message(
+                Message(
+                    sender=self.server_node,
+                    receiver=peer,
+                    message_type=ServerMessageType.REQ_VOTE.value,
+                    data={}
+                )
+            )
+        time.sleep(self.election_timeout)
+        self.check_time_out()
+    
+    def send_coordinate(self):
+        for peer_id, peer in self.peer_list.get_all_node().items():
+            self._send_message(
+                Message(
+                    sender=self.server_node,
+                    receiver=peer,
+                    message_type=ServerMessageType.COORDINATE.value,
+                    data={}
+                )
+            )
+    
 
     def _send_leader_message(self, msg):
         if self.state == ServerState.LEADER:
@@ -350,281 +388,38 @@ class Server:
     def _send_message(self, msg):
         self.outgoing_handler.add_message(msg)
 
-    def _commit_log(self):
-        # Process one log entry per iteration to avoid holding lock too long
-        with self.state_lock:
-            if (self.commit_index > self.last_applied) and (
-                self.last_applied + 1 < len(self.log)
-            ):
-
-                # apply the logs to state machine
-                self.last_applied += 1
-                entry = self.log[self.last_applied]
-
-                logger.info(f"Current Log State - Total Entries: {len(self.log)}")
-                for idx, log_entry in enumerate(self.log):
-                    status = "[APPLIED]" if idx <= self.last_applied else "[PENDING]"
-                    cmd = log_entry.command
-                    logger.info(
-                        f"  [{idx:3d}] {status:10} | Term: {log_entry.term} | "
-                        f"Type: {cmd.message_type} | "
-                        f"Client: {cmd.sender._id if cmd.sender else 'N/A'} | "
-                    )
-                logger.info(f"Now applying entry {self.last_applied}")
-
-                message = entry.command
-                match message.message_type:
-                    case ClientMessageType.REQ_DISC.value:
-                        node = message.sender.copy()
-                        node.last_heartbeat = time.time()
-                        self.client_list.add_node(message.sender._id, node)
-
-                        if self.state == ServerState.LEADER:
-                            logger.info(
-                                f"Sending RES_DISC to client {ClientMessageType.RES_DISC.value} "
-                                f"{message.sender._id} {message.sender.ip} {message.sender.port}"
-                            )
-
-                            msg = Message(
-                                message_type=ClientMessageType.RES_DISC.value,
-                                sender=self.server_node,
-                                receiver=message.sender,
-                            )
-                            self._send_leader_message(msg)
-                    case ClientMessageType.REQ_REMOVE_CLIENT.value:
-                        self.client_list.remove_node(message.sender._id)
-                        logger.info(
-                            f"Removed client {message.sender._id} from client list"
-                        )
-
-                        for auction_id, auction in self.auction_list.items():
-                            if auction.get_auctioneer()._id == message.sender._id:
-                                logger.info(f"auctioneer no longer alive")
-                            else:
-                                auction.bidders.remove_node(message.sender._id)
-
-                    case ClientMessageType.REQ_JOIN_AUCTION.value:
-                        auction_id = message.data.get("auction_id")
-                        logger.info(f"The auction id is {auction_id}")
-                        status = False
-                        auction = self.auction_list.get(auction_id)
-                        if (
-                            auction is not None
-                            and auction.status == AuctionRoomStatus.AWAITING_PEEERS
-                        ):
-                            auction.add_participant(message.sender._id, message.sender)
-                            status = True
-
-                        self._send_leader_message(
-                            Message(
-                                message_type=ClientMessageType.RES_JOIN_AUCTION.value,
-                                receiver=message.sender,
-                                sender=self.server_node,
-                                data={"status": status},
-                            )
-                        )
-
-                        if (
-                            auction.get_bidder_count()
-                            >= auction.get_min_number_bidders()
-                        ):
-                            # Send message to auctioneer and all bidders that auction room is ready
-                            room_enabled_msg_data = {
-                                "message": "Auction room ready",
-                                "status": "Success",
-                            }
-
-                            self._send_leader_message(
-                                Message(
-                                    message_type=ClientMessageType.RES_AUCTION_ROOM_ENABLED.value,
-                                    sender=self.server_node,
-                                    receiver=auction.get_auctioneer(),
-                                    data=room_enabled_msg_data,
-                                )
-                            )
-
-                            # Send to all bidders
-                            for _, bidder in auction.bidders.get_all_node().items():
-                                self._send_leader_message(
-                                    Message(
-                                        message_type=ClientMessageType.RES_AUCTION_ROOM_ENABLED.value,
-                                        sender=self.server_node,
-                                        receiver=bidder,
-                                        data=room_enabled_msg_data,
-                                    )
-                                )
-
-                    case ClientMessageType.REQ_CREATE_AUCTION.value:
-                        auction_room = AuctionRoom(
-                            auctioneer=message.sender,
-                            rounds=message.data.get("rounds"),
-                            item=message.data.get("item"),
-                            min_bid=message.data.get("min_bid"),
-                            min_bidders=message.data.get("min_bidders"),
-                        )
-                        self.auction_list[auction_room.get_id()] = auction_room
-                        logger.debug(f"{auction_room.to_json()}")
-
-                        data = {
-                            "auction_id": auction_room.get_id(),
-                            "msg": f"Auction room created, awaiting bidders to join {auction_room.get_min_number_bidders() - auction_room.get_bidder_count()}",
-                        }
-
-                        self._send_leader_message(
-                            Message(
-                                message_type=ClientMessageType.RES_CREATE_AUCTION.value,
-                                sender=self.server_node,
-                                receiver=message.sender,
-                                data=data,
-                            )
-                        )
-                    case ClientMessageType.REQ_START_AUCTION.value:
-                        auction_room = self.auction_list.get(
-                            message.data.get("auction_id")
-                        )
-                        if auction_room is not None:
-                            threading.Thread(
-                                target=self.auction_process,
-                                args=(auction_room,),
-                                daemon=True,
-                            ).start()
-                            self._send_leader_message(
-                                Message(
-                                    message_type=ClientMessageType.RES_START_AUCTION.value,
-                                    sender=self.server_node,
-                                    receiver=message.sender,
-                                    data={
-                                        "status": "Success",
-                                        "message": "Auction started",
-                                    },
-                                )
-                            )
-                        else:
-                            self._send_leader_message(
-                                Message(
-                                    message_type=ClientMessageType.RES_START_AUCTION.value,
-                                    sender=self.server_node,
-                                    receiver=message.sender,
-                                    data={
-                                        "status": "Failed",
-                                        "message": "Auction not found",
-                                    },
-                                )
-                            )
-                    case ClientMessageType.RES_MAKE_BID.value:
-                        self.active_rounds[message.data.get("auction_id")].add_bid(
-                            message.sender._id, message.data.get("bid")
-                        )
-                    case _:
-                        logger.info("default case")
-
-    def transiton_to_candidate(self):
-        with self.state_lock:
-            self.term += 1
-            self.state = ServerState.CANDIDATE
-            self.voted_for = self.server_node._id
-            self.votes_received = {self.server_node._id}
-            self.election_timeout = (
-                self._get_random_election_timeout()
-            )  # should we initialize this only once ?
-            self.last_heartbeat_time = time.time()
-
-        self.send_request_vote()
-        self.check_election_won()
-
-    def send_request_vote(self):
-        peers = self.peer_list.get_all_node()
-        for peer_id, peer_info in peers.items():
-            data = {
-                "term": self.term,
-                "last_log_index": len(self.log) - 1,
-                "last_log_term": self.log[-1].term if len(self.log) > 0 else 0,
-            }
-            self._send_message(
-                Message(
-                    message_type=ServerMessageType.REQ_VOTE.value,
-                    sender=self.server_node,
-                    receiver=peer_info,
-                    data=data,
-                )
-            )
-
-    def check_election_won(self):
-        with self.state_lock:
-            if self.state != ServerState.CANDIDATE:
-                return
-
-            total_nodes = len(self.peer_list.get_all_node()) + 1
-            if len(self.votes_received) > (total_nodes // 2):
-                logger.info(
-                    f"Server: {self.server_node._id} has won the election for term: {self.term}"
-                )
-                self.state = ServerState.LEADER
-                peers = self.peer_list.get_all_node()
-                for peer_id in peers.keys():
-                    self.next_index[peer_id] = len(self.log)
-                    self.match_index[peer_id] = -1
 
     def handle_request_vote(self, msg):
-        if msg.sender._id == str(self.server_node._id):
-            return
-        with self.state_lock:
-            grant_vote = False
+        sender_id = get_uuid_int(msg.sender._id)
 
-            if msg.data.get("term") > self.term:
-                self.term = msg.data.get("term")
-                self.state = ServerState.FOLLOWER
-                self.voted_for = None
-
-            if msg.data.get("term") == self.term:
-                if self.voted_for is None or self.voted_for == msg.sender._id:
-                    server_last_log_term = self.log[-1].term if len(self.log) > 0 else 0
-                    server_last_log_index = len(self.log) - 1
-
-                    vote_possible = msg.data.get(
-                        "last_log_term"
-                    ) > server_last_log_term or (
-                        msg.data.get("last_log_term") == server_last_log_term
-                        and msg.data.get("last_log_index") >= server_last_log_index
-                    )
-
-                    if vote_possible:
-                        grant_vote = True
-                        self.voted_for = msg.sender._id
-                        self.last_heartbeat_time = time.time()
-
-            term = self.term
-        data = {
-            "term": term,
-            "vote_granted": grant_vote,
-            "voter_id": str(self.server_node._id),
-        }
-        self._send_message(
-            Message(
-                message_type=ServerMessageType.RES_VOTE.value,
-                sender=self.server_node,
-                receiver=msg.sender,
-                data=data,
+        if self.priority > sender_id:
+            self._send_message(
+                Message(
+                    sender=self.server_node,
+                    receiver=msg.sender,
+                    message_type=ServerMessageType.RES_VOTE.value,
+                    data={}
+                )
             )
-        )
-        logger.info(
-            f"Vote {'GRANTED' if grant_vote else 'DENIED'} for {msg.sender._id} for term: {self.term}"
-        )
+            with self.state_lock:
+                self.state = ServerState.CANDIDATE
+        else:
+            with self.state_lock:
+                self.state = ServerState.FOLLOWER
+
 
     def handle_vote_resp(self, msg):
-        if msg.sender._id == str(self.server_node._id):
-            return
+        if msg.message_type == ServerMessageType.RES_VOTE:
+            with self.state_lock:
+                self.ok_received = True
+
+    
+
+    def handle_coordinate_msg(self, msg):
         with self.state_lock:
-            if self.state != ServerState.CANDIDATE or msg.data.get("term") != self.term:
-                return
-
-            if msg.data.get("vote_granted"):
-                self.votes_received.add(msg.data.get("voter_id"))
-                logger.info(
-                    f"Received vote from {msg.data.get('voter_id')}. Total: {len(self.votes_received)}"
-                )
-
-        self.check_election_won()
+            self.state = ServerState.FOLLOWER
+            self.leader = msg.sender
+        logger.info("falling back to follower, leader found: {}", msg.sender)
 
     def send_heartbeat_to_clients(self):
         """Send heartbeat to all connected clients (unidirectional - no response expected)"""
@@ -657,31 +452,12 @@ class Server:
 
                 peers = self.peer_list.get_all_node()
                 for peer_id, peer_info in peers.items():
-                    prev_log_idx = self.next_index[peer_id] - 1
-                    prev_log_term = 0
-                    if prev_log_idx >= 0 and prev_log_idx < len(self.log):
-                        prev_log_term = self.log[prev_log_idx].term
-
-                    max_entries_per_msg = 10
-                    start_idx = self.next_index.get(peer_id)
-                    end_idx = min(start_idx + max_entries_per_msg, len(self.log))
-                    entries_to_send = [
-                        entry.to_dict() for entry in self.log[start_idx:end_idx]
-                    ]
-
-                    data = {
-                        "term": self.term,
-                        "prev_log_index": prev_log_idx,
-                        "prev_log_term": prev_log_term,
-                        "leader_commit": self.commit_index,
-                        "entries": entries_to_send,
-                    }
                     messages.append(
                         Message(
                             message_type=ServerMessageType.REQ_APPEND_ENTRIES.value,
                             sender=self.server_node,
                             receiver=peer_info,
-                            data=data,
+                            data={},
                         )
                     )
 
@@ -691,86 +467,16 @@ class Server:
             time.sleep(self.heartbeat_interval)
 
     def handle_append_entries(self, msg):
-        if msg.sender._id == str(self.server_node._id):
+        if msg.sender._id == self.server_node._id:
             return
-
         with self.state_lock:
-            if msg.data.get("term") > self.term:
-                self.term = msg.data.get("term")
-                self.state = ServerState.FOLLOWER
-                self.voted_for = None
-
-            if msg.data.get("term") < self.term:
-                resp = False
-            elif msg.data.get("prev_log_index") >= len(self.log):
-                resp = False
-            elif (
-                msg.data.get("prev_log_index") >= 0
-                and msg.data.get("prev_log_term")
-                != self.log[msg.data.get("prev_log_index")].term
-            ):
-                resp = False
-            else:
-                try:
-                    del self.log[msg.data.get("prev_log_index") + 1 :]
-                except IndexError:
-                    pass
-                # Convert dict entries back to LogEntries objects
-                for entry_dict in msg.data.get("entries", []):
-                    self.log.append(LogEntries.from_dict(entry_dict))
-
-                if msg.data.get("leader_commit") > self.commit_index:
-                    self.commit_index = min(
-                        msg.data.get("leader_commit"), len(self.log) - 1
-                    )
-                resp = True
-
-            data = {
-                "term": self.term,
-                "success": resp,
-            }
-            self.election_timeout = self._get_random_election_timeout()
             self.last_heartbeat_time = time.time()
-        self._send_message(
-            Message(
-                message_type=ServerMessageType.RES_APPEND_ENTRIES.value,
-                sender=self.server_node,
-                receiver=msg.sender,
-                data=data,
-            )
-        )
+        logger.info("handle heartbeat from leader")
 
     def handle_append_entries_resp(self, msg):
-        if msg.sender._id == str(self.server_node._id):
+        if msg.sender._id == self.server_node._id:
             return
-
-        with self.state_lock:
-            if self.term < msg.data.get("term"):
-                self.term = msg.data.get("term")
-                self.state = ServerState.FOLLOWER
-                return
-
-            if msg.data.get("success") == False:
-                self.next_index[msg.sender._id] -= 1
-
-            if msg.data.get("success") == True and msg.data.get("term") == self.term:
-                self.match_index[msg.sender._id] = self.next_index[msg.sender._id]
-                self.next_index[msg.sender._id] += 1
-
-            index_count = defaultdict(int)
-            for ind in self.match_index.values():
-                index_count[ind] += 1
-            if len(self.log) > 0:
-                index_count[len(self.log) - 1] += 1
-
-            for key, val in index_count.items():
-                if key >= 0 and key < len(self.log):
-                    if (
-                        key > self.commit_index
-                        and val > (self.peer_list.get_len() + 1) // 2
-                        and self.log[key].term == self.term
-                    ):
-                        self.commit_index = key
+        logger.info("handle heartbeat response ack:")
 
     def handle_retrieve_auction_list_req(self, message):
         auctions = []
