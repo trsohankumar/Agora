@@ -22,10 +22,12 @@ class ClientMessageType(MessageType):
     RES_START_AUCTION = 17
     RES_ROUND_RESULT = 18
     RES_AUCTION_RESULT = 19
+
 class ServerMessageType(MessageType):
     REQ_DISC = 100
     RES_DISC = 101
     REQ_VOTE = 102
     RES_VOTE = 103
-    REQ_APPEND_ENTRIES = 104
-    RES_APPEND_ENTRIES = 105
+    COORDINATE = 104
+    REQ_APPEND_ENTRIES = 105
+    RES_APPEND_ENTRIES = 106
