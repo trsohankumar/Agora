@@ -1,1 +1,6 @@
+argparse
+uuid
 loguru
+pyfiglet
+termcolor
+colorama

@@ -1,53 +1,46 @@
-import socket
 import json
-from message.message_handler import MessageHandler
-import threading
+import socket
+import time
+
 from loguru import logger
-from node_list import Node
-from message.message import Message
+
+from constants import BROADCAST_ADDRESS, BROADCAST_PORT, BROADCAST_TIMEOUT
+from util import request_response_handler, uuid_util
+
 
 class Broadcast:
-    def __init__(self, node: Node):
-        self.node: Node = node
-        self.broadcast_address = self._get_broadcast_ip(self.node.ip)
-        self.broadcast_port    = 5000
-        self.broadcast_timeout = 5
-        self.broadcast_recv_buffer_size = 1024
-        self.worker_thread = None,
 
+    def __init__(self, component):
+        self.uuid = uuid_util.get_uuid()
+        self.component = component
+        self.timeout = BROADCAST_TIMEOUT
+        logger.debug("Broadcast Thread {} for Server {} up", self.uuid, component.uuid)
 
-    def _get_broadcast_ip(self, node_ip):
-        address = ".".join(node_ip.split(".")[:3]) + "." + "255"
-        return address
+    def broadcast(self, message):
+        logger.debug("Broadcasting message : {}", message)
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as broadcast_socket:
+            broadcast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            broadcast_socket.sendto(json.dumps(message).encode(), (BROADCAST_ADDRESS, BROADCAST_PORT))
+            time.sleep(self.timeout)
 
-
-    def start_broadcast_listen(self, msg_handler: MessageHandler):
-        self.worker_thread = threading.Thread(target=self._listen_broadcast, args=(msg_handler, ), daemon=True)
-        self.worker_thread.start()
-
-    def send_broadcast(self, message_type):
-        message = Message(
-            message_type=message_type,
-            sender=self.node,
-        )
-
-        broadcast_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        broadcast_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-
-        logger.info(f"Sending broadcast on ip:{self.broadcast_address}, port: {self.broadcast_port}")
-
-        broadcast_sock.sendto(json.dumps(message.to_json()).encode(), (self.broadcast_address, self.broadcast_port))
-        broadcast_sock.close()
-
-    def _listen_broadcast(self, message_queue: MessageHandler):
-        broadcast_listen_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        broadcast_listen_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        broadcast_listen_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-        broadcast_listen_sock.bind(('', self.broadcast_port))
-        logger.info(f"Started listening for broadcast on ip:{self.broadcast_address}, port: {self.broadcast_port}")
-        while True:
-            data, _ = broadcast_listen_sock.recvfrom(self.broadcast_recv_buffer_size)
-            message = Message.from_json(json.loads(data.decode()))
-            message_queue.add_message(message)
-
-        broadcast_listen_sock.close()
+    def listen(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as broadcast_socket:
+            broadcast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            try:
+                broadcast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                broadcast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+            except AttributeError:
+                logger.warning("No attribute SO_REUSEPORT/SO_REUSEADDR, skipping setting them")
+            broadcast_socket.bind(('', BROADCAST_PORT))
+            logger.debug("Listening to broadcast address at port {}", BROADCAST_PORT)
+            try:
+                while True:
+                    data, addr = broadcast_socket.recvfrom(8192)
+                    if data:
+                        message = json.loads(data.decode())
+                        logger.debug("Received message from {} : {}", str(addr), message)
+                        request_response_handler.resolve_and_put_in_queue(message, self.component)
+            except Exception as e:
+                raise KeyboardInterrupt
+            finally:
+                logger.critical("Broadcast listener shutting down")
