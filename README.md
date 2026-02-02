@@ -144,7 +144,6 @@ Key parameters in `constants.py`:
 | `HEART_BEAT_TIMEOUT` | 60s | Time before node considered failed |
 | `MAX_MISSED_HEART_BEATS` | 2 | Missed ACKs before triggering election |
 | `REPLICATION_INTERVAL` | 5s | State replication frequency |
-| `SNAPSHOT_INTERVAL` | 15s | Checkpoint frequency |
 | `AUCTION_START_TIMEOUT` | 60s | Time for auctioneer to confirm start |
 
 ---
