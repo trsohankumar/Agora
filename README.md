@@ -193,8 +193,7 @@ Key parameters in `constants.py`:
 ### Recovery Strategy
 
 1. **Primary mechanism**: In-memory replicated state from leader
-2. **Fallback**: File-based snapshots (local or remote)
-3. **Post-recovery**: Notify clients, resume active auctions
+2. **Post-recovery**: Notify clients, resume active auctions
 
 ---
 
