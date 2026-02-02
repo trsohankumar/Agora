@@ -52,8 +52,10 @@ class ServerAuctionManager:
         self.clients[client_uuid] = client
         self.server.discovered_clients[client_uuid] = client
 
-        # Check if client is already in an auction
+        # Check if client is already in an active auction
         for auction_id, auction in dict(self.auctions).items():
+            if auction["status"] not in ("waiting", "active"):
+                continue
             if auction["auctioneer_uuid"] == client_uuid or client_uuid in list(auction["participants"]):
                 logger.warning("Client {} is already in auction {}. Denying request.", client_uuid, auction_id)
                 self.server.udp.unicast(
@@ -97,6 +99,9 @@ class ServerAuctionManager:
             ),
             client["ip_address"], client["port"]
         )
+
+        # Trigger state replication to backups
+        self._trigger_replication()
 
     @require_initialization
     def list_auctions(self, message):
@@ -199,6 +204,9 @@ class ServerAuctionManager:
             ),
             client["ip_address"], client["port"]
         )
+
+        # Trigger state replication to backups
+        self._trigger_replication()
 
         # Check if we have enough bidders to start
         if len(list(auction["participants"])) >= auction["min_bidders"]:
@@ -403,6 +411,9 @@ class ServerAuctionManager:
         logger.info("Recorded bid of {} from {} for auction {} round {}",
                    bid_amount, client_uuid, auction_id, round_num)
 
+        # Trigger state replication to backups (bid is critical state)
+        self._trigger_replication()
+
         # Broadcast the bid to all participants via unicast
         bid_msg = request_response_handler.bid_broadcast(
             self.server, auction_id, round_num, client_uuid, bid_amount
@@ -449,6 +460,9 @@ class ServerAuctionManager:
         winner, winning_amount = self.calculate_winner(auction)
         logger.info("Auction {} completed. Winner: {} with total bid: {}",
                    auction_id, winner, winning_amount)
+
+        # Trigger state replication to backups (auction completion is critical)
+        self._trigger_replication()
 
         # Build results for all participants
         cumulative_bids = self._get_cumulative_bids(auction)
@@ -632,3 +646,12 @@ class ServerAuctionManager:
                     request_response_handler.auction_reassignment(self.server),
                     client_details["ip_address"], client_details["port"]
                 )
+
+    def _trigger_replication(self):
+        """Trigger immediate state replication to backup servers."""
+        if self.server.is_leader:
+            try:
+                replication_manager = self.server.messages_manager.replication_manager
+                replication_manager.trigger_replication()
+            except Exception as e:
+                logger.warning("Failed to trigger replication: {}", e)

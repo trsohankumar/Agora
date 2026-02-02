@@ -5,6 +5,7 @@ from discovery.discovery_handler import DiscoveryHandler
 from election.election_manager import ElectionManager
 from auction.server_auction_manager import ServerAuctionManager
 from heartbeat.hearbeat import Heartbeat
+from replication.state_replication_manager import StateReplicationManager
 from snapshots.snapshots_manager import SnapshotsManager
 from util import request_response_handler
 
@@ -18,6 +19,7 @@ class ServerMessagesManager:
         self.heartbeat_manager = Heartbeat(self.server, constants.HEART_BEAT_INTERVAL)
         self.auction_manager = ServerAuctionManager(self.server)
         self.snapshots_manager = SnapshotsManager(self.server)
+        self.replication_manager = StateReplicationManager(self.server)
         logger.debug("Messages manager for {} initialized", self.server.uuid)
 
     def handle_queue_messages(self, queue_name):
@@ -79,8 +81,9 @@ class ServerMessagesManager:
             case constants.SEND_SNAPSHOT:
                 self.snapshots_manager.send_snapshot(message["component_uuid"])
             case constants.SEND_SNAPSHOT_RESPONSE:
-                self.snapshots_manager.remote_snapshot = False
                 self.snapshots_manager.restore_latest_remote_snapshot(message)
+            case constants.STATE_REPLICATE:
+                self.replication_manager.receive_replicated_state(message)
             case constants.REASSIGNMENT:
                 self.auction_manager.start_reassignment(message)
             case _:

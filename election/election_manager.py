@@ -52,26 +52,40 @@ class ElectionManager:
 
     def declare_self_as_leader(self, server, election_uuid):
         server.is_leader = True
-        restore_snapshot = False
+        restore_state = False
         if server.leader:
             server.prev_leader = server.leader
-            restore_snapshot = True
+            restore_state = True
         server.leader = server.uuid
         server.broadcast.broadcast(request_response_handler.leader_election_coordination_request(election_uuid, server))
         server.messages_manager.heartbeat_manager.election_triggered = False
-        if restore_snapshot:
-            snapshots_manager = server.messages_manager.snapshots_manager
-            if snapshots_manager.is_snapshot_local(server.prev_leader):
-                snapshots_manager.restore_latest_snapshot(server.prev_leader, False)
+
+        if restore_state:
+            replication_manager = server.messages_manager.replication_manager
+
+            # First, try to restore from replicated state (Primary-Backup)
+            if replication_manager.has_replicated_state():
+                logger.info("Restoring state from Primary-Backup replication")
+                replication_manager.restore_from_replicated_state()
             else:
-                snapshots_manager.snapshot_restored = True
-                snapshots_manager.restore_latest_snapshot(server.prev_leader, True)
+                # Fall back to file-based snapshots (legacy)
+                logger.info("No replicated state available, trying file-based snapshots")
+                snapshots_manager = server.messages_manager.snapshots_manager
+                if snapshots_manager.is_snapshot_local(server.prev_leader):
+                    snapshots_manager.restore_latest_snapshot(server.prev_leader, False)
+                else:
+                    snapshots_manager.snapshot_restored = True
+                    snapshots_manager.restore_latest_snapshot(server.prev_leader, True)
 
             # Notify known clients about the new leader
             self.notify_clients_of_new_leader(server)
 
             # Resume any active auctions
             server.messages_manager.auction_manager.resume_active_auctions()
+
+        # Start periodic state replication to backup servers
+        logger.info("Starting periodic state replication as leader")
+        server.messages_manager.replication_manager.start_periodic_replication()
 
     def notify_clients_of_new_leader(self, server):
         """Notify all known clients about the new leader."""

@@ -231,31 +231,59 @@ class SnapshotsManager:
 
     def restore_latest_snapshot(self, uuid, remote):
         try:
-            logger.info("Starting snapshot restoration")
+            logger.info("Starting snapshot restoration for {}", uuid)
             if remote:
                 logger.info("Initializing snapshot restoration from remote")
                 self.remote_snapshot = True
                 self.ask_snapshot(uuid)
+
+                # Wait for remote snapshot with timeout
+                timeout = 30  # seconds
+                start_time = time.time()
+                while self.remote_snapshot and (time.time() - start_time) < timeout:
+                    time.sleep(0.5)
+
+                if self.remote_snapshot:
+                    logger.warning("Timeout waiting for remote snapshot after {}s", timeout)
+                    self.remote_snapshot = False
+                else:
+                    logger.info("Remote snapshot restoration completed")
             else:
                 logger.info("Restoring snapshot from local")
                 latest_snapshot = self.get_latest_snapshot(uuid)
-                self.restore_from_snapshot_json(latest_snapshot)
+                if latest_snapshot:
+                    self.restore_from_snapshot_json(latest_snapshot)
+                else:
+                    logger.warning("No local snapshot found for {}", uuid)
         except Exception as e:
             logger.warning("Exception while restoring snapshot from {}: {}".format(uuid, e))
 
     def restore_latest_remote_snapshot(self, message):
-        self.restore_from_snapshot_json(json.load(message["snapshot"]))
+        """Restore state from a snapshot received from another server."""
+        snapshot_data = message.get("snapshot")
+        if snapshot_data:
+            logger.info("Received remote snapshot, restoring...")
+            self.restore_from_snapshot_json(snapshot_data)
+            self.remote_snapshot = False
+        else:
+            logger.warning("Received empty snapshot response")
 
     def ask_snapshot(self, uuid):
         self.component.broadcast.broadcast(request_response_handler.send_snapshot(self.component, uuid))
 
     def send_snapshot(self, component_uuid):
+        """Send snapshot of specified component to the requesting leader."""
         latest_snapshot = self.get_latest_snapshot(component_uuid)
-        if not latest_snapshot:
+        if latest_snapshot:
+            # We have a snapshot for the requested component, send it to the leader
             leader = self.component.discovered_servers.get(self.component.leader)
             if leader:
+                logger.info("Sending snapshot for {} to leader {}", component_uuid, self.component.leader)
                 self.component.udp.unicast(
                     request_response_handler.send_snapshot_response(self.component, latest_snapshot),
-                                       leader["ip_address"], leader["port"])
+                    leader["ip_address"], leader["port"]
+                )
+            else:
+                logger.warning("Cannot send snapshot - leader not found in discovered servers")
         else:
-            logger.info("No snapshot to restore from")
+            logger.debug("No local snapshot available for {}", component_uuid)
