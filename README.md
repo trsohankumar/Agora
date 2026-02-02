@@ -165,7 +165,6 @@ Key parameters in `constants.py`:
 | `HEART_BEAT` | Liveness check |
 | `HEART_BEAT_ACK` | Heartbeat acknowledgment |
 | `STATE_REPLICATE` | Full state replication to backups |
-| `SNAPSHOT_MARKER` | Chandy-Lamport marker |
 
 ### Auction Operations
 | Message | Description |
