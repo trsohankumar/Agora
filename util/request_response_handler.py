@@ -34,6 +34,8 @@ def put_in_server_queue(message, server):
             server.queues['client'].append(message)
         case constants.SNAPSHOT_MARKER \
              | constants.SEND_SNAPSHOT \
+             | constants.SEND_SNAPSHOT_RESPONSE \
+             | constants.STATE_REPLICATE \
              | constants.REASSIGNMENT:
             server.queues['snapshot'].append(message)
 
@@ -187,6 +189,17 @@ def leader_info_response(component, leader_details):
         "respondent_uuid": component.uuid,
         "respondent_type": component.type,
         "leader_details": leader_details,
+        "timestamp": time.time()
+    }
+
+
+def state_replicate(component, state_data):
+    """Create a state replication message from leader to backups."""
+    return {
+        "type": constants.STATE_REPLICATE,
+        "leader_uuid": component.uuid,
+        "leader_type": component.type,
+        "state": state_data,
         "timestamp": time.time()
     }
 

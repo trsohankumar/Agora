@@ -40,6 +40,10 @@ class UDP:
             self.socket.sendto(json.dumps(message).encode(), (recipient["ip_address"], recipient["port"]))
 
     def setup_multicast(self, multicast_ip, multicast_port):
+        if self.multicast_setup:
+            self.multicast_socket.close()
+
+        self.multicast_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         self.multicast_ip = multicast_ip
         self.multicast_port = multicast_port
         try:
@@ -81,10 +85,17 @@ class UDP:
             while not self.multicast_setup:
                 time.sleep(1)
             while True:
-                data, client_address = self.multicast_socket.recvfrom(8192)
-                message = json.loads(data.decode())
-                logger.debug("Received multicast from {} for {}", client_address, self.component.uuid)
-                request_response_handler.resolve_and_put_in_queue(message, self.component)
+                try:
+                    data, client_address = self.multicast_socket.recvfrom(8192)
+                    message = json.loads(data.decode())
+                    logger.debug("Received multicast from {} for {}", client_address, self.component.uuid)
+                    request_response_handler.resolve_and_put_in_queue(message, self.component)
+                except OSError as e:
+                    if e.errno == 9:  # Bad file descriptor - socket was replaced
+                        logger.debug("Multicast socket was replaced, waiting for new socket...")
+                        time.sleep(0.5)
+                        continue
+                    raise
         except Exception as e:
             logger.error("Caught exception in multicast listener: {}", e)
             raise KeyboardInterrupt

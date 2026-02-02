@@ -65,6 +65,17 @@ class DiscoveryHandler:
             self.component.discovered_servers[discovered_server_uuid] = discovered_server
         else:
             self.component.discovered_clients[discovered_server_uuid] = discovered_server
+            # Trigger replication when a new client is discovered
+            self._trigger_replication()
+
+    def _trigger_replication(self):
+        """Trigger state replication when new client/server is discovered."""
+        if hasattr(self.component, 'is_leader') and self.component.is_leader:
+            try:
+                replication_manager = self.component.messages_manager.replication_manager
+                replication_manager.trigger_replication()
+            except Exception as e:
+                logger.debug("Could not trigger replication: {}", e)
 
     def get_server_details(self, discovered_server_details, operation_type):
         # Message types that use requester_* fields
