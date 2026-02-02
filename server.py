@@ -104,3 +104,8 @@ class Server:
             threading.Timer(40, self.print_debug_info).start()
         except Exception as e:
             raise KeyboardInterrupt
+
+
+if __name__ == "__main__":
+    server = Server()
+    server.start_servers()
