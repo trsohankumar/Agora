@@ -288,3 +288,8 @@ class Client:
             threading.Timer(60, self.period_debug_info).start()
         except Exception as e:
             raise KeyboardInterrupt
+
+
+if __name__ == "__main__":
+    client = Client()
+    client.start_clients()
