@@ -1,3 +1,4 @@
+import sys
 import multiprocessing
 import threading
 import time
@@ -11,6 +12,9 @@ from messages.server_messages_manager import ServerMessagesManager
 from udp.udp import UDP
 from util import request_response_handler, uuid_util
 
+
+logger.remove()
+logger.add(sys.stderr, level=20)
 
 def require_initialization(func):
     def wrapper(self, *args, **kwargs):
