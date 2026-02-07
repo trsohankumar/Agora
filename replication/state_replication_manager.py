@@ -97,8 +97,6 @@ class StateReplicationManager:
                 "current_round": auction.get("current_round"),
                 "bids": bids_data,
                 "status": auction.get("status"),
-                "multicast_ip": auction.get("multicast_ip"),
-                "multicast_port": auction.get("multicast_port"),
                 "ready_check_time": auction.get("ready_check_time")
             }
 
@@ -205,8 +203,6 @@ class StateReplicationManager:
                     "participants": mp_manager.list(auction_data.get("participants", [])),
                     "current_round": auction_data.get("current_round"),
                     "status": auction_data.get("status"),
-                    "multicast_ip": auction_data.get("multicast_ip"),
-                    "multicast_port": auction_data.get("multicast_port"),
                     "ready_check_time": auction_data.get("ready_check_time")
                 })
 
@@ -271,8 +267,6 @@ class StateReplicationManager:
                         "participants": mp_manager.list(auction_data.get("participants", [])),
                         "current_round": auction_data.get("current_round"),
                         "status": auction_data.get("status"),
-                        "multicast_ip": auction_data.get("multicast_ip"),
-                        "multicast_port": auction_data.get("multicast_port"),
                         "ready_check_time": auction_data.get("ready_check_time")
                     })
 

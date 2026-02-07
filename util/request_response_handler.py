@@ -227,7 +227,7 @@ def auction_create_request(component, item_name, min_bid_price, min_rounds, min_
 
 
 def auction_create_ack(component, auction_id, item_name, min_bid_price, min_rounds,
-                       min_bidders, multicast_ip, multicast_port):
+                       min_bidders):
     return {
         "type": constants.AUCTION_CREATE_ACK,
         "respondent_uuid": component.uuid,
@@ -237,9 +237,7 @@ def auction_create_ack(component, auction_id, item_name, min_bid_price, min_roun
         "item_name": item_name,
         "min_bid_price": min_bid_price,
         "min_rounds": min_rounds,
-        "min_bidders": min_bidders,
-        "multicast_ip": multicast_ip,
-        "multicast_port": multicast_port
+        "min_bidders": min_bidders
     }
 
 
@@ -288,8 +286,7 @@ def auction_join_request(component, auction_id):
     }
 
 
-def auction_join_ack(component, auction_id, item_name, min_bid_price, min_rounds,
-                     multicast_ip, multicast_port):
+def auction_join_ack(component, auction_id, item_name, min_bid_price, min_rounds):
     return {
         "type": constants.AUCTION_JOIN_ACK,
         "respondent_uuid": component.uuid,
@@ -298,9 +295,7 @@ def auction_join_ack(component, auction_id, item_name, min_bid_price, min_rounds
         "auction_id": auction_id,
         "item_name": item_name,
         "min_bid_price": min_bid_price,
-        "min_rounds": min_rounds,
-        "multicast_ip": multicast_ip,
-        "multicast_port": multicast_port
+        "min_rounds": min_rounds
     }
 
 
@@ -337,9 +332,8 @@ def auction_ready_confirm(component, auction_id):
     }
 
 
-def auction_start(component, auction_id, item_name, min_bid_price, min_rounds, participants,
-                  multicast_ip=None, multicast_port=None):
-    msg = {
+def auction_start(component, auction_id, item_name, min_bid_price, min_rounds, participants):
+    return {
         "type": constants.AUCTION_START,
         "respondent_uuid": component.uuid,
         "respondent_type": component.type,
@@ -350,11 +344,6 @@ def auction_start(component, auction_id, item_name, min_bid_price, min_rounds, p
         "min_rounds": min_rounds,
         "participants": participants
     }
-    if multicast_ip:
-        msg["multicast_ip"] = multicast_ip
-    if multicast_port:
-        msg["multicast_port"] = multicast_port
-    return msg
 
 
 def auction_cancel(component, auction_id, reason):

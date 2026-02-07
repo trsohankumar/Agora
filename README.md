@@ -22,7 +22,7 @@ A fault-tolerant distributed auction system built with Python, featuring leader 
 | **Message Ordering** | Total Ordering via Centralized Sequencer |
 | **Fault Tolerance** | Crash faults |
 | **Recovery** | In-memory state replication |
-| **Communication** | UDP Unicast + UDP Broadcast |
+| **Communication** | UDP Unicast + UDP Broadcast (discovery only) |
 
 ### Auction Features
 
@@ -53,7 +53,7 @@ Agora/
 ├── broadcast/
 │   └── broadcast.py          # UDP broadcast
 ├── udp/
-│   └── udp.py                # UDP unicast/multicast
+│   └── udp.py                # UDP unicast
 ├── messages/
 │   ├── server_messages_manager.py  # Server message handling
 │   └── client_messages_manager.py  # Client message handling

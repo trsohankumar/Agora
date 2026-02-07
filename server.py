@@ -48,14 +48,11 @@ class Server:
 
     def start_servers(self):
         logger.info("Server {} started", self.uuid)
-        # self.udp.setup_multicast(multicast_ip="224.1.1.1", multicast_port=5007)
-        # Start normal UDP object
         self.start_chores()
 
     @require_initialization
     def start_chores(self):
         threading.Thread(target=self.udp.listen, daemon=True).start()
-        threading.Thread(target=self.udp.listen_multicast, daemon=True).start()
         threading.Thread(target=self.broadcast.listen, daemon=True).start()
         [threading.Thread(target=self.messages_manager.handle_queue_messages, args=(queue_name,),
                           daemon=True).start()

@@ -24,8 +24,6 @@ class ClientAuctionManager:
         self.is_active = False
         self.is_waiting_for_start = False
         self.is_bidding = False
-        self.multicast_ip = None
-        self.multicast_port = None
         self.available_auctions = []
         self.last_bid_time = None
         self.ready_to_confirm = False
@@ -55,11 +53,6 @@ class ClientAuctionManager:
         self.min_rounds = message["min_rounds"]
         self.is_auctioneer = True
         self.is_waiting_for_start = True
-        self.multicast_ip = message["multicast_ip"]
-        self.multicast_port = message["multicast_port"]
-
-        # Set up multicast listener
-        self.client.udp.setup_multicast(self.multicast_ip, self.multicast_port)
 
         logger.info("Auction created successfully! ID: {}", self.auction_id)
         print(f"\n✓ Auction created for '{self.item_name}'")
@@ -112,11 +105,6 @@ class ClientAuctionManager:
         self.min_rounds = message["min_rounds"]
         self.is_auctioneer = False
         self.is_waiting_for_start = True
-        self.multicast_ip = message["multicast_ip"]
-        self.multicast_port = message["multicast_port"]
-
-        # Set up multicast listener
-        self.client.udp.setup_multicast(self.multicast_ip, self.multicast_port)
 
         logger.info("Successfully joined auction {}", self.auction_id)
         print(f"\n✓ Joined auction for '{self.item_name}'")
@@ -166,15 +154,6 @@ class ClientAuctionManager:
         self.participants = message.get("participants", [])
         self.is_active = True
         self.is_waiting_for_start = False
-
-        # Setup multicast if provided (for reconnection after failover)
-        if "multicast_ip" in message and "multicast_port" in message:
-            new_ip = message["multicast_ip"]
-            new_port = message["multicast_port"]
-            if self.multicast_ip != new_ip or self.multicast_port != new_port:
-                self.multicast_ip = new_ip
-                self.multicast_port = new_port
-                self.client.udp.setup_multicast(self.multicast_ip, self.multicast_port)
 
         logger.info("Auction {} started with {} participants",
                    self.auction_id, len(self.participants))

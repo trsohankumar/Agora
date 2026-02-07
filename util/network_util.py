@@ -1,5 +1,3 @@
-import ipaddress
-import random
 import socket
 import struct
 
@@ -30,11 +28,3 @@ def get_broadcast_address():
         return broadcast_address
     except Exception as e:
         logger.error("Cannot resolve broadcast address: {}", e)
-
-
-def get_multicast_address():
-    base_multicast = int(ipaddress.IPv4Address("224.0.0.0"))
-    multicast_offset = random.randint(0, (1 << 28) - 1)
-    multicast_address = ipaddress.IPv4Address(base_multicast + multicast_offset)
-    logger.info("Multicast address: {}", multicast_address)
-    return str(multicast_address)

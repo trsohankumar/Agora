@@ -57,7 +57,6 @@ class Client:
     def start_chores(self):
         threading.Thread(target=self.broadcast.listen, daemon=True).start()
         threading.Thread(target=self.udp.listen, daemon=True).start()
-        threading.Thread(target=self.udp.listen_multicast, daemon=True).start()
         [threading.Thread(target=self.messages_manager.handle_queue_messages, args=(queue_name,), daemon=True).start()
          for queue_name in list(self.queues.keys())]
         self.messages_manager.initiate_discovery()

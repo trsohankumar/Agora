@@ -1,5 +1,4 @@
 import multiprocessing
-import random
 import threading
 import time
 
@@ -7,7 +6,6 @@ from loguru import logger
 
 import constants
 from util import request_response_handler, copy_utils, uuid_util
-from util.network_util import get_multicast_address
 
 
 def require_initialization(func):
@@ -68,8 +66,6 @@ class ServerAuctionManager:
 
         # Create new auction
         auction_id = uuid_util.get_uuid()
-        multicast_ip = get_multicast_address()
-        multicast_port = random.randint(49152, 65535)
 
         auction = self.manager.dict({
             "auction_id": auction_id,
@@ -81,9 +77,7 @@ class ServerAuctionManager:
             "participants": self.manager.list([client_uuid]),
             "current_round": 0,
             "bids": self.manager.dict(),
-            "status": "waiting",
-            "multicast_ip": multicast_ip,
-            "multicast_port": multicast_port
+            "status": "waiting"
         })
 
         self.auctions[auction_id] = auction
@@ -95,7 +89,7 @@ class ServerAuctionManager:
             request_response_handler.auction_create_ack(
                 self.server, auction_id, message["item_name"],
                 message["min_bid_price"], message["min_rounds"],
-                message["min_bidders"], multicast_ip, multicast_port
+                message["min_bidders"]
             ),
             client["ip_address"], client["port"]
         )
@@ -199,8 +193,7 @@ class ServerAuctionManager:
         self.server.udp.unicast(
             request_response_handler.auction_join_ack(
                 self.server, auction_id, auction["item_name"],
-                auction["min_bid_price"], auction["min_rounds"],
-                auction["multicast_ip"], auction["multicast_port"]
+                auction["min_bid_price"], auction["min_rounds"]
             ),
             client["ip_address"], client["port"]
         )
@@ -298,19 +291,11 @@ class ServerAuctionManager:
 
         logger.info("Starting auction {} for item '{}'", auction_id, auction["item_name"])
 
-        # Set up multicast for all participants
-        for participant_uuid in list(auction["participants"]):
-            if participant_uuid in self.clients:
-                participant = self.clients[participant_uuid]
-                copy_utils.add_item_to_dict(self.clients, participant_uuid, "multicast_port", auction["multicast_port"])
-                copy_utils.add_item_to_dict(self.clients, participant_uuid, "multicast_ip", auction["multicast_ip"])
-
         # Notify all participants that auction is starting via unicast
         auction_start_msg = request_response_handler.auction_start(
             self.server, auction_id, auction["item_name"],
             auction["min_bid_price"], auction["min_rounds"],
-            list(auction["participants"]),
-            auction["multicast_ip"], auction["multicast_port"]
+            list(auction["participants"])
         )
 
         # Get all participant details
@@ -506,16 +491,6 @@ class ServerAuctionManager:
         return cumulative
 
     @require_initialization
-    def broadcast_to_auction(self, auction_id, message):
-        """Broadcast a message to all auction participants via multicast."""
-        auction = self.auctions[auction_id]
-        multicast_ip = auction["multicast_ip"]
-        multicast_port = auction["multicast_port"]
-
-        logger.info("Broadcasting {} to auction {} at {}:{}", message.get("type"), auction_id, multicast_ip, multicast_port)
-        self.server.udp.multicast(message, multicast_ip, multicast_port)
-
-    @require_initialization
     def send_actual_leader_info_to_client(self, message):
         """Send leader info to client when this server is not the leader."""
         logger.debug("Server {} is not the leader, sending leader info to client", self.server.uuid)
@@ -543,20 +518,16 @@ class ServerAuctionManager:
             if auction.get("status") == "active":
                 logger.info("Resuming active auction {} for item '{}'", auction_id, auction.get("item_name"))
 
-                multicast_ip = auction.get("multicast_ip")
-                multicast_port = auction.get("multicast_port")
-
-                # Notify all participants that auction is resuming
+                # Notify all participants that auction is resuming via unicast
                 for participant_uuid in list(auction.get("participants", [])):
                     if participant_uuid in self.clients:
                         participant = self.clients[participant_uuid]
-                        # Send auction start again to re-establish connection (includes multicast info)
+                        # Send auction start again to re-establish connection
                         self.server.udp.unicast(
                             request_response_handler.auction_start(
                                 self.server, auction_id, auction["item_name"],
                                 auction["min_bid_price"], auction["min_rounds"],
-                                list(auction["participants"]),
-                                multicast_ip, multicast_port
+                                list(auction["participants"])
                             ),
                             participant["ip_address"], participant["port"]
                         )
