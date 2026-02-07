@@ -1,3 +1,5 @@
+import time
+
 from loguru import logger
 
 from util import request_response_handler, uuid_util
@@ -52,40 +54,80 @@ class ElectionManager:
 
     def declare_self_as_leader(self, server, election_uuid):
         server.is_leader = True
-        restore_state = False
-        if server.leader:
-            server.prev_leader = server.leader
-            restore_state = True
+        server.prev_leader = server.leader  # Could be None for new servers
         server.leader = server.uuid
         server.broadcast.broadcast(request_response_handler.leader_election_coordination_request(election_uuid, server))
         server.messages_manager.heartbeat_manager.election_triggered = False
 
-        if restore_state:
-            replication_manager = server.messages_manager.replication_manager
+        # Always try to restore state (fixes bug where new server becomes leader without state)
+        state_restored = self.restore_state(server)
 
-            # First, try to restore from replicated state (Primary-Backup)
-            if replication_manager.has_replicated_state():
-                logger.info("Restoring state from Primary-Backup replication")
-                replication_manager.restore_from_replicated_state()
-            else:
-                # Fall back to file-based snapshots (legacy)
-                logger.info("No replicated state available, trying file-based snapshots")
-                snapshots_manager = server.messages_manager.snapshots_manager
-                if snapshots_manager.is_snapshot_local(server.prev_leader):
-                    snapshots_manager.restore_latest_snapshot(server.prev_leader, False)
-                else:
-                    snapshots_manager.snapshot_restored = True
-                    snapshots_manager.restore_latest_snapshot(server.prev_leader, True)
+        if state_restored:
+            logger.info("State restoration successful")
+        else:
+            logger.warning("No state to restore - starting with empty state")
 
-            # Notify known clients about the new leader
-            self.notify_clients_of_new_leader(server)
+        # Always notify known clients about the new leader
+        self.notify_clients_of_new_leader(server)
 
-            # Resume any active auctions
-            server.messages_manager.auction_manager.resume_active_auctions()
+        # Always resume any active auctions (if any exist after restoration)
+        server.messages_manager.auction_manager.resume_active_auctions()
 
         # Start periodic state replication to backup servers
         logger.info("Starting periodic state replication as leader")
         server.messages_manager.replication_manager.start_periodic_replication()
+
+    def restore_state(self, server):
+        """
+        Attempt to restore state from in-memory replicated state.
+        Returns True if state was restored, False otherwise.
+        """
+        replication_manager = server.messages_manager.replication_manager
+
+        # Try to restore from in-memory replicated state
+        if replication_manager.has_replicated_state():
+            logger.info("Restoring state from Primary-Backup replication")
+            return replication_manager.restore_from_replicated_state()
+
+        # Request state from peer servers if we have peers
+        if server.discovered_servers:
+            logger.info("No local state available, requesting state from peers")
+            return self.request_state_from_peers(server)
+
+        # No state available
+        logger.warning("No state sources available")
+        return False
+
+    def request_state_from_peers(self, server):
+        """
+        Request state from other servers in the cluster via replication.
+        Returns True if state was successfully retrieved, False otherwise.
+        """
+        replication_manager = server.messages_manager.replication_manager
+
+        # Request state replication from peer servers
+        for server_uuid, server_details in dict(server.discovered_servers).items():
+            if server_uuid == server.uuid:
+                continue
+
+            logger.info("Requesting state replication from peer server {}", server_uuid)
+
+            # Send a request for state replication
+            server.udp.unicast(
+                request_response_handler.request_state_replication(server),
+                server_details["ip_address"],
+                server_details["port"]
+            )
+
+            # Wait briefly for state to arrive
+            time.sleep(2)
+
+            # Check if we received replicated state
+            if replication_manager.has_replicated_state():
+                logger.info("Received replicated state from peer {}", server_uuid)
+                return replication_manager.restore_from_replicated_state()
+
+        return False
 
     def notify_clients_of_new_leader(self, server):
         """Notify all known clients about the new leader."""

@@ -21,7 +21,7 @@ A fault-tolerant distributed auction system built with Python, featuring leader 
 | **Replication** | Passive (Primary-Backup) |
 | **Message Ordering** | Total Ordering via Centralized Sequencer |
 | **Fault Tolerance** | Crash faults |
-| **Recovery** | Checkpoint-based with in-memory replication |
+| **Recovery** | In-memory state replication |
 | **Communication** | UDP Unicast + UDP Broadcast |
 
 ### Auction Features
@@ -46,8 +46,6 @@ Agora/
 │   └── election_manager.py   # Bully election algorithm
 ├── replication/
 │   └── state_replication_manager.py  # Primary-backup replication
-├── snapshots/
-│   └── snapshots_manager.py  # Checkpoint/snapshot management
 ├── heartbeat/
 │   └── hearbeat.py           # Failure detection
 ├── discovery/

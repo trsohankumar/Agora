@@ -4,7 +4,6 @@ import constants
 from discovery.discovery_handler import DiscoveryHandler
 from auction.client_auction_manager import ClientAuctionManager
 from heartbeat.hearbeat import Heartbeat
-from snapshots.snapshots_manager import SnapshotsManager
 from util import request_response_handler
 
 
@@ -15,7 +14,6 @@ class ClientMessagesManager:
         self.discovery_handler = DiscoveryHandler(self.client)
         self.heartbeat_manager = Heartbeat(self.client, constants.HEART_BEAT_INTERVAL)
         self.auction_manager = ClientAuctionManager(self.client)
-        self.snapshots_manager = SnapshotsManager(self.client)
         logger.debug("Messages manager for {} initialized", self.client.uuid)
 
     def handle_queue_messages(self, queue_name):
@@ -87,9 +85,7 @@ class ClientMessagesManager:
                 self.auction_manager.handle_auction_winner(message)
             case constants.AUCTION_LOSER:
                 self.auction_manager.handle_auction_loser(message)
-            # Snapshot and leader
-            case constants.SNAPSHOT_MARKER:
-                self.snapshots_manager.handle_marker(message)
+            # Leader updates
             case constants.LEADER_DETAILS:
                 leader_server = message["leader_details"]
                 self.client.leader = leader_server["uuid"]

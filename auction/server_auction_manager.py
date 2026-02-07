@@ -630,14 +630,13 @@ class ServerAuctionManager:
         failed_server = message["failed_uuid"] if "failed_uuid" in message else message["requester_uuid"]
         logger.info("Starting reassignment process for failed server {}", failed_server)
 
-        snapshots_manager = self.server.messages_manager.snapshots_manager
+        replication_manager = self.server.messages_manager.replication_manager
         existing_clients = dict(self.clients)
 
-        if snapshots_manager.is_snapshot_local(failed_server):
-            snapshots_manager.restore_latest_snapshot(failed_server, False)
-        else:
-            snapshots_manager.snapshot_restored = True
-            snapshots_manager.restore_latest_snapshot(failed_server, True)
+        # Restore from replicated state if available
+        if replication_manager.has_replicated_state():
+            logger.info("Restoring state from replication for reassignment")
+            replication_manager.restore_from_replicated_state()
 
         # Notify clients that were connected to the failed server
         for client, client_details in self.clients.items():

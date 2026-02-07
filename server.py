@@ -66,6 +66,12 @@ class Server:
         self.messages_manager.initiate_discovery()
         logger.info("Server {} waited {} seconds for discovering other servers", self.uuid, time.time() - t)
         logger.info("Server {} - Discovered {} other servers", self.uuid, len(self.discovered_servers))
+
+        # If other servers exist, wait for state sync before election
+        if self.discovered_servers:
+            logger.info("Server {} waiting for state sync before election", self.uuid)
+            self.wait_for_state_sync()
+
         # Trigger election
         self.messages_manager.election_manager.send_election_request(self)
         logger.info("Server {} - Leader status: {} (leader={})", self.uuid, self.is_leader, self.leader)
@@ -73,7 +79,6 @@ class Server:
         print(f"Is leader: {self.is_leader}")
         print(f"Listening on: {self.udp.ip_address}:{self.udp.port}")
         self.messages_manager.heartbeat_manager.send_heartbeat()
-        threading.Timer(constants.SNAPSHOT_INTERVAL, self.messages_manager.snapshots_manager.initiate_snapshot())
         # Period debug task to print the elected leaders
         self.print_debug_info()
         while True:
@@ -84,6 +89,34 @@ class Server:
             except KeyboardInterrupt:
                 logger.info("Main thread caught KeyboardInterrupt. Shutting down gracefully.")
                 raise
+
+    def wait_for_state_sync(self):
+        """
+        Wait to receive state from existing leader before participating in election.
+        This prevents a new server with higher UUID from becoming leader without state.
+        """
+        replication_manager = self.messages_manager.replication_manager
+        max_wait_time = 10  # seconds
+        start_time = time.time()
+
+        # Request state from each discovered server
+        for server_uuid, server_details in dict(self.discovered_servers).items():
+            logger.info("Requesting state from server {}", server_uuid)
+            self.udp.unicast(
+                request_response_handler.request_state_replication(self),
+                server_details["ip_address"],
+                server_details["port"]
+            )
+
+        # Wait for state to arrive
+        while time.time() - start_time < max_wait_time:
+            if replication_manager.has_replicated_state():
+                logger.info("Received replicated state, ready for election")
+                return True
+            time.sleep(0.5)
+
+        logger.warning("Timeout waiting for state sync after {}s", max_wait_time)
+        return False
 
     def print_debug_info(self):
         try:

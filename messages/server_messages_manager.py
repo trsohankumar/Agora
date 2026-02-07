@@ -6,7 +6,6 @@ from election.election_manager import ElectionManager
 from auction.server_auction_manager import ServerAuctionManager
 from heartbeat.hearbeat import Heartbeat
 from replication.state_replication_manager import StateReplicationManager
-from snapshots.snapshots_manager import SnapshotsManager
 from util import request_response_handler
 
 
@@ -18,7 +17,6 @@ class ServerMessagesManager:
         self.election_manager = ElectionManager(self.server)
         self.heartbeat_manager = Heartbeat(self.server, constants.HEART_BEAT_INTERVAL)
         self.auction_manager = ServerAuctionManager(self.server)
-        self.snapshots_manager = SnapshotsManager(self.server)
         self.replication_manager = StateReplicationManager(self.server)
         logger.debug("Messages manager for {} initialized", self.server.uuid)
 
@@ -74,16 +72,11 @@ class ServerMessagesManager:
             case constants.BID_SUBMIT | constants.BID_SUBMIT_RETRANSMIT:
                 logger.info("Received bid from client")
                 self.auction_manager.receive_bid(message)
-            # Snapshot messages
-            case constants.SNAPSHOT_MARKER:
-                self.snapshots_manager.handle_marker(message)
-                self.auction_manager.print_auction_sessions()
-            case constants.SEND_SNAPSHOT:
-                self.snapshots_manager.send_snapshot(message["component_uuid"])
-            case constants.SEND_SNAPSHOT_RESPONSE:
-                self.snapshots_manager.restore_latest_remote_snapshot(message)
+            # Replication messages
             case constants.STATE_REPLICATE:
                 self.replication_manager.receive_replicated_state(message)
+            case constants.STATE_REPLICATION_REQUEST:
+                self.replication_manager.handle_state_request(message)
             case constants.REASSIGNMENT:
                 self.auction_manager.start_reassignment(message)
             case _:

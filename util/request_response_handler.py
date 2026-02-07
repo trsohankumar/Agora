@@ -32,12 +32,10 @@ def put_in_server_queue(message, server):
              | constants.BID_SUBMIT \
              | constants.BID_SUBMIT_RETRANSMIT:
             server.queues['client'].append(message)
-        case constants.SNAPSHOT_MARKER \
-             | constants.SEND_SNAPSHOT \
-             | constants.SEND_SNAPSHOT_RESPONSE \
-             | constants.STATE_REPLICATE \
+        case constants.STATE_REPLICATE \
+             | constants.STATE_REPLICATION_REQUEST \
              | constants.REASSIGNMENT:
-            server.queues['snapshot'].append(message)
+            server.queues['replication'].append(message)
 
 
 def put_in_client_queue(message, client):
@@ -51,7 +49,7 @@ def setup_queues(component, manager):
         queues['heartbeat'] = manager.list()
         queues['election'] = manager.list()
         queues['client'] = manager.list()
-        queues['snapshot'] = manager.list()
+        queues['replication'] = manager.list()
     else:
         queues['client'] = manager.list()
     return queues
@@ -151,38 +149,6 @@ def heart_beat_ack(component, heartbeat):
     }
 
 
-# Snapshot Messages
-
-def snapshot_marker(component, marked_servers):
-    return {
-        "type": constants.SNAPSHOT_MARKER,
-        "requester_uuid": component.uuid,
-        "requester_type": component.type,
-        "timestamp": time.time(),
-        "from": marked_servers
-    }
-
-
-def send_snapshot(component, uuid):
-    return {
-        "type": constants.SEND_SNAPSHOT,
-        "requester_uuid": component.uuid,
-        "requester_type": component.type,
-        "component_uuid": uuid,
-        "timestamp": time.time()
-    }
-
-
-def send_snapshot_response(component, latest_snapshot):
-    return {
-        "type": constants.SEND_SNAPSHOT_RESPONSE,
-        "respondent_uuid": component.uuid,
-        "respondent_type": component.type,
-        "snapshot": latest_snapshot,
-        "timestamp": time.time()
-    }
-
-
 def leader_info_response(component, leader_details):
     return {
         "type": constants.LEADER_DETAILS,
@@ -200,6 +166,18 @@ def state_replicate(component, state_data):
         "leader_uuid": component.uuid,
         "leader_type": component.type,
         "state": state_data,
+        "timestamp": time.time()
+    }
+
+
+def request_state_replication(component):
+    """Request state replication from a peer server."""
+    return {
+        "type": constants.STATE_REPLICATION_REQUEST,
+        "requester_uuid": component.uuid,
+        "requester_type": component.type,
+        "requester_ip_address": component.udp.ip_address,
+        "requester_port": component.udp.port,
         "timestamp": time.time()
     }
 

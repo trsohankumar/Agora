@@ -1,3 +1,4 @@
+import sys
 import multiprocessing
 import threading
 import time
@@ -13,6 +14,8 @@ from messages.client_messages_manager import ClientMessagesManager
 from udp.udp import UDP
 from util import request_response_handler, uuid_util
 
+logger.remove()
+logger.add(sys.stderr, level=40)
 
 def require_initialization(func):
     def wrapper(self, *args, **kwargs):
@@ -61,7 +64,6 @@ class Client:
         discovery_start = time.time()
         self.messages_manager.heartbeat_manager.send_heartbeat()
         self.period_debug_info()
-        threading.Timer(constants.SNAPSHOT_INTERVAL, self.messages_manager.snapshots_manager.initiate_snapshot())
 
         # Display auction banner
         cprint(figlet_format('AUCTION', font='dos_rebel'), 'green', "on_black", attrs=['bold'])
