@@ -68,7 +68,7 @@ class Server:
         logger.info("Server {} - Discovered {} other servers", self.uuid, len(self.discovered_servers))
 
         # If other servers exist, wait for state sync before election
-        if self.discovered_servers:
+        if len(self.discovered_servers) > 0:
             logger.info("Server {} waiting for state sync before election", self.uuid)
             self.wait_for_state_sync()
 

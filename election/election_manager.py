@@ -19,7 +19,7 @@ class ElectionManager:
 
     def send_election_request(self, server):
         logger.debug("Starting election")
-        if server.discovered_servers:
+        if len(server.discovered_servers) > 0:
             logger.debug("Other servers were discovered by {}", server.uuid)
             election_uuid = uuid_util.get_uuid()
             logger.info("Starting election {}, triggered by {}", election_uuid, server.uuid)
@@ -90,7 +90,7 @@ class ElectionManager:
             return replication_manager.restore_from_replicated_state()
 
         # Request state from peer servers if we have peers
-        if server.discovered_servers:
+        if len(server.discovered_servers) > 0:
             logger.info("No local state available, requesting state from peers")
             return self.request_state_from_peers(server)
 

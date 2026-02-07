@@ -159,32 +159,30 @@ class StateReplicationManager:
                 if server_uuid != self.server.uuid:
                     self.server.discovered_servers[server_uuid] = server_details
 
-            # Remove servers not in leader's view (except self)
-            for server_uuid in list(self.server.discovered_servers.keys()):
-                if server_uuid not in leader_servers and server_uuid != self.server.uuid:
-                    del self.server.discovered_servers[server_uuid]
-
             # Sync discovered_clients with leader's view
             leader_clients = self.replicated_state.get("discovered_clients", {})
             for client_uuid, client_details in leader_clients.items():
                 self.server.discovered_clients[client_uuid] = client_details
 
-            # Remove clients not in leader's view
-            for client_uuid in list(self.server.discovered_clients.keys()):
-                if client_uuid not in leader_clients:
-                    del self.server.discovered_clients[client_uuid]
-
-            # Sync auction state
-            self.apply_auction_state()
+            # Sync auction state (with separate error handling)
+            try:
+                self.apply_auction_state()
+            except Exception as e:
+                logger.warning("Error applying auction state: {}", e)
 
             logger.debug("Applied replicated state to local data structures")
 
         except Exception as e:
             logger.error("Error applying replicated state: {}", e)
+            import traceback
+            traceback.print_exc()
 
     def apply_auction_state(self):
         """Apply auction state from replicated data."""
         auctions_data = self.replicated_state.get("auctions", {})
+        if not auctions_data:
+            return
+
         auction_manager = self.server.messages_manager.auction_manager
 
         # Ensure auction manager is initialized
@@ -193,38 +191,34 @@ class StateReplicationManager:
 
         mp_manager = auction_manager.manager
 
-        # Get current auction IDs
-        current_auction_ids = set(auction_manager.auctions.keys())
-        replicated_auction_ids = set(auctions_data.get("running_auctions", {}).keys())
-
-        # Remove auctions not in leader's view
-        for auction_id in current_auction_ids - replicated_auction_ids:
-            del auction_manager.auctions[auction_id]
-
         # Add/update auctions from leader
-        for auction_id, auction_data in auctions_data.get("running_auctions", {}).items():
-            auction = mp_manager.dict({
-                "auction_id": auction_data.get("auction_id"),
-                "item_name": auction_data.get("item_name"),
-                "min_bid_price": auction_data.get("min_bid_price"),
-                "min_rounds": auction_data.get("min_rounds"),
-                "min_bidders": auction_data.get("min_bidders"),
-                "auctioneer_uuid": auction_data.get("auctioneer_uuid"),
-                "participants": mp_manager.list(auction_data.get("participants", [])),
-                "current_round": auction_data.get("current_round"),
-                "status": auction_data.get("status"),
-                "multicast_ip": auction_data.get("multicast_ip"),
-                "multicast_port": auction_data.get("multicast_port"),
-                "ready_check_time": auction_data.get("ready_check_time")
-            })
+        running_auctions = auctions_data.get("running_auctions", {})
+        for auction_id, auction_data in running_auctions.items():
+            try:
+                auction = mp_manager.dict({
+                    "auction_id": auction_data.get("auction_id"),
+                    "item_name": auction_data.get("item_name"),
+                    "min_bid_price": auction_data.get("min_bid_price"),
+                    "min_rounds": auction_data.get("min_rounds"),
+                    "min_bidders": auction_data.get("min_bidders"),
+                    "auctioneer_uuid": auction_data.get("auctioneer_uuid"),
+                    "participants": mp_manager.list(auction_data.get("participants", [])),
+                    "current_round": auction_data.get("current_round"),
+                    "status": auction_data.get("status"),
+                    "multicast_ip": auction_data.get("multicast_ip"),
+                    "multicast_port": auction_data.get("multicast_port"),
+                    "ready_check_time": auction_data.get("ready_check_time")
+                })
 
-            # Restore bids
-            bids = mp_manager.dict()
-            for round_num, round_bids in auction_data.get("bids", {}).items():
-                bids[int(round_num)] = mp_manager.dict(round_bids)
-            auction["bids"] = bids
+                # Restore bids
+                bids = mp_manager.dict()
+                for round_num, round_bids in auction_data.get("bids", {}).items():
+                    bids[int(round_num)] = mp_manager.dict(round_bids)
+                auction["bids"] = bids
 
-            auction_manager.auctions[auction_id] = auction
+                auction_manager.auctions[auction_id] = auction
+            except Exception as e:
+                logger.warning("Error restoring auction {}: {}", auction_id, e)
 
         # Sync auction clients
         for client_uuid, client_details in auctions_data.get("clients", {}).items():
