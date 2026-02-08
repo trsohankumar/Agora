@@ -30,18 +30,21 @@ class Heartbeat:
         for server, recent_heartbeat in recent_heartbeats.items():
             if server not in self.failed and time.time() - recent_heartbeat > constants.HEART_BEAT_TIMEOUT:
                 self.failed.append(server)
-                self.component.messages_manager.auction_manager.reassign_server(server)
+                self.component.auction_manager.reassign_server(server)
 
     def send_heartbeat(self):
+        # periodically run this function
         threading.Timer(self.heartbeat_interval, self.send_heartbeat).start()
+
         # Leader is not elected or not known
         if self.component.leader is None or self.component.discovered_servers.get(self.component.leader) is None:
             logger.debug("Leader not yet known or selected, skipping heartbeat")
             self.connected_since = None  # Reset connection time
             return
-        # You yourself is the leader
+
+        # You are the leader
         if hasattr(self.component, 'is_leader') and self.component.is_leader is True:
-            logger.debug("Server {} is the leader, skipping heartbeat", self.component.uuid)
+            logger.debug("I am the leader, skipping heartbeat as it will receive heartbeats", self.component.uuid)
             return
 
         # Track when we first connected
@@ -51,18 +54,14 @@ class Heartbeat:
         leader = self.component.discovered_servers.get(self.component.leader)
         heartbeat = request_response_handler.heart_beat(self.component)
         self.heartbeats[(self.component.leader, heartbeat["heart_beat_uuid"])] = heartbeat["timestamp"]
-        logger.debug("{} {} -  sent heartbeat ({}) to {}", self.component.type, self.component.uuid,
-                     heartbeat["heart_beat_uuid"],
-                     self.component.leader)
-        self.component.udp.unicast(heartbeat, leader["ip_address"], leader["port"])
+        logger.debug("{} sent heartbeat ({}) to {}", self.component.type, self.component.uuid, heartbeat["heart_beat_uuid"], self.component.leader)
+        self.component.unicast.unicast(heartbeat, leader["ip_address"], leader["port"])
 
         heartbeats_for_leader = [
-            (leader, heartbeat_uuid) for leader, heartbeat_uuid in list(self.heartbeats.keys())
-            if leader == self.component.leader
+            (leader, heartbeat_uuid) for leader, heartbeat_uuid in self.heartbeats.keys() if leader == self.component.leader
         ]
-        logger.debug("{} {} has {} pending heartbeats from {}", self.component.type, self.component.uuid,
-                     len(self.heartbeats),
-                     self.component.leader)
+
+        logger.debug("{} has {} pending heartbeats from {}", self.component.type, len(self.heartbeats), self.component.leader)
 
         # Only trigger failure detection for servers
         # Clients will detect failure through connection errors or explicit notification
@@ -70,39 +69,46 @@ class Heartbeat:
             logger.warning("More than {} pending heartbeats, triggering leader election", constants.MAX_MISSED_HEART_BEATS)
             self.election_triggered = True
             self.heartbeats = {}
-            self.component.messages_manager.election_manager.send_election_request(self.component)
+            self.component.leader = None
+            self.component.election_manager.send_election_request()
 
     def process_heartbeat(self, heartbeat):
         if self.component.type == constants.CLIENT:
             return
+        
         if hasattr(self.component, 'is_leader') and self.component.is_leader is False:
-            logger.debug("Server {} is not the leader, skipping heartbeat processing", self.component.uuid)
+            logger.debug("Server is not the leader, skipping heartbeat processing")
             return
+        
         self.leader_heartbeat_info()
         requester_uuid = heartbeat["requester_uuid"]
-        logger.debug("{} {} got heartbeat ({}) from {}", self.component.type, self.component.uuid,
-                     heartbeat["heart_beat_uuid"],
-                     requester_uuid)
+        logger.debug("{} got heartbeat ({}) from {}", self.component.type, heartbeat["heart_beat_uuid"], requester_uuid)
 
         # Check both discovered_servers and discovered_clients
         requester = self.component.discovered_servers.get(requester_uuid)
+
+        # if not server then it can be client
         if requester is None and hasattr(self.component, 'discovered_clients'):
             requester = self.component.discovered_clients.get(requester_uuid)
 
+        # if not both then it is undiscovered node
         if requester is None:
-            logger.debug("{} {} not discovered by leader {}", self.component.type, requester_uuid, self.component.uuid)
+            logger.debug("{} {} not discovered by leader", self.component.type, requester_uuid)
             return
+        
         self.heartbeats[(requester_uuid, heartbeat["heart_beat_uuid"])] = time.time()
-        self.component.udp.unicast(request_response_handler.heart_beat_ack(self.component, heartbeat),
-                                   requester["ip_address"], requester["port"])
+
+        self.component.unicast.unicast(request_response_handler.heart_beat_ack(self.component, heartbeat), requester["ip_address"], requester["port"])
 
     def process_heartbeat_ack(self, heartbeat_ack):
         if hasattr(self.component, 'is_leader') and self.component.is_leader is True:
-            logger.debug("Server {} is the leader, skipping heartbeat ack processing", self.component.uuid)
+            logger.debug("Server is the leader, skipping heartbeat ack processing")
             return
-        logger.debug("{} {} - got ack heartbeat for {} from {}", self.component.type, self.component.uuid,
-                     heartbeat_ack["heart_beat_uuid"], self.component.leader)
+        
+        logger.debug("{} got ack heartbeat for {} from {}", self.component.type, heartbeat_ack["heart_beat_uuid"], self.component.leader)
         heartbeat_uuid = heartbeat_ack["heart_beat_uuid"]
+
+        # remove from pending heartbeats list
         self.heartbeats.pop((self.component.leader, heartbeat_uuid), None)
 
     def check_alive(self, uuid):

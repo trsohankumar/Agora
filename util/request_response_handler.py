@@ -5,56 +5,6 @@ from constants import SERVER
 from util import uuid_util
 
 
-def resolve_and_put_in_queue(message, component):
-    if component.type == constants.CLIENT:
-        put_in_client_queue(message, component)
-    else:
-        put_in_server_queue(message, component)
-
-
-def put_in_server_queue(message, server):
-    match message['type']:
-        case constants.DISCOVERY_REQUEST \
-             | constants.DISCOVERY_RESPONSE:
-            server.queues['discovery'].append(message)
-        case constants.LEADER_ACK_RESPONSE \
-             | constants.LEADER_ELECTION_REQUEST \
-             | constants.LEADER_ELECTION_RESPONSE \
-             | constants.LEADER_ELECTION_COORDINATION_REQUEST:
-            server.queues['election'].append(message)
-        case constants.HEART_BEAT \
-             | constants.HEART_BEAT_ACK:
-            server.queues['heartbeat'].append(message)
-        case constants.AUCTION_CREATE_REQUEST \
-             | constants.AUCTION_LIST_REQUEST \
-             | constants.AUCTION_JOIN_REQUEST \
-             | constants.AUCTION_READY_CONFIRM \
-             | constants.BID_SUBMIT \
-             | constants.BID_SUBMIT_RETRANSMIT:
-            server.queues['client'].append(message)
-        case constants.STATE_REPLICATE \
-             | constants.STATE_REPLICATION_REQUEST \
-             | constants.REASSIGNMENT:
-            server.queues['replication'].append(message)
-
-
-def put_in_client_queue(message, client):
-    client.queues['client'].append(message)
-
-
-def setup_queues(component, manager):
-    queues = {}
-    if component.type == SERVER:
-        queues['discovery'] = manager.list()
-        queues['heartbeat'] = manager.list()
-        queues['election'] = manager.list()
-        queues['client'] = manager.list()
-        queues['replication'] = manager.list()
-    else:
-        queues['client'] = manager.list()
-    return queues
-
-
 # Discovery Messages
 
 def discovery_request(component):
@@ -63,9 +13,9 @@ def discovery_request(component):
         "requester_type": component.type,
         "requester_uuid": component.uuid,
         "timestamp": time.time(),
-        "requester_hostname": component.udp.host_name,
-        "requester_ip_address": component.udp.ip_address,
-        "requester_port": component.udp.port,
+        "requester_hostname": component.unicast.host_name,
+        "requester_ip_address": component.unicast.ip_address,
+        "requester_port": component.unicast.port,
     }
 
 
@@ -74,9 +24,9 @@ def discovery_response(discovery_request, component):
         "type": constants.DISCOVERY_RESPONSE,
         "respondent_type": SERVER,
         "respondent_uuid": component.uuid,
-        "respondent_hostname": component.udp.host_name,
-        "respondent_ip_address": component.udp.ip_address,
-        "respondent_port": component.udp.port,
+        "respondent_hostname": component.unicast.host_name,
+        "respondent_ip_address": component.unicast.ip_address,
+        "respondent_port": component.unicast.port,
         "timestamp": time.time(),
         "response_to": discovery_request.get("requester_uuid")
     }
@@ -176,8 +126,8 @@ def request_state_replication(component):
         "type": constants.STATE_REPLICATION_REQUEST,
         "requester_uuid": component.uuid,
         "requester_type": component.type,
-        "requester_ip_address": component.udp.ip_address,
-        "requester_port": component.udp.port,
+        "requester_ip_address": component.unicast.ip_address,
+        "requester_port": component.unicast.port,
         "timestamp": time.time()
     }
 
@@ -200,9 +150,9 @@ def auction_reassignment(component):
         "timestamp": time.time(),
         "details": {
             "uuid": component.uuid,
-            "hostname": component.udp.host_name,
-            "ip_address": component.udp.ip_address,
-            "port": component.udp.port,
+            "hostname": component.unicast.host_name,
+            "ip_address": component.unicast.ip_address,
+            "port": component.unicast.port,
             "type": component.type
         }
     }
@@ -215,9 +165,9 @@ def auction_create_request(component, item_name, min_bid_price, min_rounds, min_
         "type": constants.AUCTION_CREATE_REQUEST,
         "requester_uuid": component.uuid,
         "requester_type": component.type,
-        "requester_hostname": component.udp.host_name,
-        "requester_ip_address": component.udp.ip_address,
-        "requester_port": component.udp.port,
+        "requester_hostname": component.unicast.host_name,
+        "requester_ip_address": component.unicast.ip_address,
+        "requester_port": component.unicast.port,
         "timestamp": time.time(),
         "item_name": item_name,
         "min_bid_price": min_bid_price,
@@ -256,9 +206,9 @@ def auction_list_request(component):
         "type": constants.AUCTION_LIST_REQUEST,
         "requester_uuid": component.uuid,
         "requester_type": component.type,
-        "requester_hostname": component.udp.host_name,
-        "requester_ip_address": component.udp.ip_address,
-        "requester_port": component.udp.port,
+        "requester_hostname": component.unicast.host_name,
+        "requester_ip_address": component.unicast.ip_address,
+        "requester_port": component.unicast.port,
         "timestamp": time.time()
     }
 
@@ -278,9 +228,9 @@ def auction_join_request(component, auction_id):
         "type": constants.AUCTION_JOIN_REQUEST,
         "requester_uuid": component.uuid,
         "requester_type": component.type,
-        "requester_hostname": component.udp.host_name,
-        "requester_ip_address": component.udp.ip_address,
-        "requester_port": component.udp.port,
+        "requester_hostname": component.unicast.host_name,
+        "requester_ip_address": component.unicast.ip_address,
+        "requester_port": component.unicast.port,
         "timestamp": time.time(),
         "auction_id": auction_id
     }

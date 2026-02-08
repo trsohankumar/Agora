@@ -37,7 +37,7 @@ class ClientAuctionManager:
         logger.info("Creating auction for item '{}' with min_bid={}, min_rounds={}, min_bidders={}",
                    item_name, min_bid_price, min_rounds, min_bidders)
 
-        self.client.udp.unicast(
+        self.client.unicast.unicast(
             request_response_handler.auction_create_request(
                 self.client, item_name, min_bid_price, min_rounds, min_bidders
             ),
@@ -73,7 +73,7 @@ class ClientAuctionManager:
             logger.error("No server connection. Cannot list auctions.")
             return False
 
-        self.client.udp.unicast(
+        self.client.unicast.unicast(
             request_response_handler.auction_list_request(self.client),
             self.server["ip_address"], self.server["port"]
         )
@@ -91,7 +91,7 @@ class ClientAuctionManager:
             return False
 
         logger.info("Requesting to join auction {}", auction_id)
-        self.client.udp.unicast(
+        self.client.unicast.unicast(
             request_response_handler.auction_join_request(self.client, auction_id),
             self.server["ip_address"], self.server["port"]
         )
@@ -137,7 +137,7 @@ class ClientAuctionManager:
             return False
 
         logger.info("Confirming auction start for {}", self.auction_id)
-        self.client.udp.unicast(
+        self.client.unicast.unicast(
             request_response_handler.auction_ready_confirm(self.client, self.auction_id),
             self.server["ip_address"], self.server["port"]
         )
@@ -196,7 +196,7 @@ class ClientAuctionManager:
         self.last_bid_time = time.time()
         self.is_bidding = False
 
-        self.client.udp.unicast(
+        self.client.unicast.unicast(
             request_response_handler.bid_submit(
                 self.client, self.auction_id, self.current_round, bid_amount
             ),
@@ -304,7 +304,7 @@ class ClientAuctionManager:
         if self.current_round in self.my_bids:
             bid_amount = self.my_bids[self.current_round]
             logger.info("Retransmitting bid of ${} for round {}", bid_amount, self.current_round)
-            self.client.udp.unicast(
+            self.client.unicast.unicast(
                 request_response_handler.bid_submit_retransmit(
                     self.client, self.auction_id, self.current_round, bid_amount
                 ),

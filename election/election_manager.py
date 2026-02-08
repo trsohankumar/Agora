@@ -3,7 +3,7 @@ import time
 from loguru import logger
 
 from util import request_response_handler, uuid_util
-
+import constants
 
 class ElectionManager:
 
@@ -17,50 +17,55 @@ class ElectionManager:
         else:
             self.elections[message["election_uuid"]] = [response_message]
 
-    def send_election_request(self, server):
-        logger.debug("Starting election")
+    def send_election_request(self):
+        server = self.component
+        election_uuid = uuid_util.get_uuid()
+        logger.info("Starting election with id {}", election_uuid)
         if len(server.discovered_servers) > 0:
-            logger.debug("Other servers were discovered by {}", server.uuid)
-            election_uuid = uuid_util.get_uuid()
-            logger.info("Starting election {}, triggered by {}", election_uuid, server.uuid)
             servers_with_larger_uuids = [
                 discovered_server
                 for discovered_server in server.discovered_servers.values()
                 if uuid_util.get_uuid_int(discovered_server.get("uuid")) > uuid_util.get_uuid_int(server.uuid)
             ]
 
-            logger.debug("Server {} have others {}", server.uuid, servers_with_larger_uuids)
-
             if servers_with_larger_uuids:
-                logger.info("Server {} - Found {} servers with higher IDs", server.uuid, len(servers_with_larger_uuids))
+                logger.info("Found {} servers with higher IDs", server.uuid, len(servers_with_larger_uuids))
+
                 for target in servers_with_larger_uuids:
-                    server.udp.unicast(request_response_handler.leader_election_request(server, election_uuid),
-                                       target["ip_address"],
-                                       target["port"])
-                # time.sleep(UNICAST_TIMEOUT)
+                    server.unicast.unicast(request_response_handler.leader_election_request(server, election_uuid), target["ip_address"], target["port"])
+
+                # sleep to ensure that enough time has passed till we receive responses
+                time.sleep(constants.ELECTION_TIMEOUT_INTERVAL)
+
                 if self.elections.get(election_uuid):
-                    logger.info("Server {} - Got response from {}, waiting", self.component.uuid,
-                                self.elections.get(election_uuid))
+                    logger.info("Got response from {}, waiting", self.elections.get(election_uuid))
                 else:
-                    logger.info("Server {} - Got no response from other servers, declare self as the leader",
-                                self.component.uuid)
-                    self.declare_self_as_leader(server, election_uuid)
+                    logger.info("Got no response from other servers, declare self as the leader")
+                    self.declare_self_as_leader(election_uuid)
             else:
-                logger.info("Server {} - No servers with larger uuids, declaring self as leader", self.component.uuid)
-                self.declare_self_as_leader(server, election_uuid)
+                logger.info("No servers with larger uuids, declaring self as leader")
+                self.declare_self_as_leader(election_uuid)
         else:
-            logger.info("Server {} - No other servers were discovered, declaring self as leader", self.component.uuid)
-            self.declare_self_as_leader(server, uuid_util.get_uuid())
+            logger.info("No other servers were discovered, declaring self as leader")
+            self.declare_self_as_leader(uuid_util.get_uuid())
 
-    def declare_self_as_leader(self, server, election_uuid):
+    def declare_self_as_leader(self, election_uuid):
+        server = self.component
+
+        if server.is_leader and server.leader == server.uuid:
+            logger.debug("Already declared as leader, skipping duplicate declaration")
+            return
+
         server.is_leader = True
-        server.prev_leader = server.leader  # Could be None for new servers
+        server.prev_leader = server.leader
         server.leader = server.uuid
-        server.broadcast.broadcast(request_response_handler.leader_election_coordination_request(election_uuid, server))
-        server.messages_manager.heartbeat_manager.election_triggered = False
 
-        # Always try to restore state (fixes bug where new server becomes leader without state)
-        state_restored = self.restore_state(server)
+        logger.info("Sending coordination message to other servers")
+        server.broadcast.broadcast(request_response_handler.leader_election_coordination_request(election_uuid, server))
+
+        server.heartbeat_manager.election_triggered = False
+
+        state_restored = self.restore_state()
 
         if state_restored:
             logger.info("State restoration successful")
@@ -68,21 +73,18 @@ class ElectionManager:
             logger.warning("No state to restore - starting with empty state")
 
         # Always notify known clients about the new leader
-        self.notify_clients_of_new_leader(server)
+        self.notify_clients_of_new_leader()
 
         # Always resume any active auctions (if any exist after restoration)
-        server.messages_manager.auction_manager.resume_active_auctions()
+        server.auction_manager.resume_active_auctions()
 
         # Start periodic state replication to backup servers
         logger.info("Starting periodic state replication as leader")
-        server.messages_manager.replication_manager.start_periodic_replication()
+        server.replication_manager.start_periodic_replication()
 
-    def restore_state(self, server):
-        """
-        Attempt to restore state from in-memory replicated state.
-        Returns True if state was restored, False otherwise.
-        """
-        replication_manager = server.messages_manager.replication_manager
+    def restore_state(self):
+        server = self.component
+        replication_manager = server.replication_manager
 
         # Try to restore from in-memory replicated state
         if replication_manager.has_replicated_state():
@@ -92,18 +94,14 @@ class ElectionManager:
         # Request state from peer servers if we have peers
         if len(server.discovered_servers) > 0:
             logger.info("No local state available, requesting state from peers")
-            return self.request_state_from_peers(server)
+            return self.request_state_from_peers()
 
-        # No state available
-        logger.warning("No state sources available")
+        logger.warning("No state sources available as there are no peers")
         return False
 
-    def request_state_from_peers(self, server):
-        """
-        Request state from other servers in the cluster via replication.
-        Returns True if state was successfully retrieved, False otherwise.
-        """
-        replication_manager = server.messages_manager.replication_manager
+    def request_state_from_peers(self):
+        server = self.component
+        replication_manager = server.replication_manager
 
         # Request state replication from peer servers
         for server_uuid, server_details in dict(server.discovered_servers).items():
@@ -113,14 +111,14 @@ class ElectionManager:
             logger.info("Requesting state replication from peer server {}", server_uuid)
 
             # Send a request for state replication
-            server.udp.unicast(
+            server.unicast.unicast(
                 request_response_handler.request_state_replication(server),
                 server_details["ip_address"],
                 server_details["port"]
             )
 
             # Wait briefly for state to arrive
-            time.sleep(2)
+            time.sleep(constants.REPLICATION_DATA_AWAIT)
 
             # Check if we received replicated state
             if replication_manager.has_replicated_state():
@@ -129,42 +127,39 @@ class ElectionManager:
 
         return False
 
-    def notify_clients_of_new_leader(self, server):
-        """Notify all known clients about the new leader."""
+    def notify_clients_of_new_leader(self):
+        server = self.component
+
         leader_details = {
             "uuid": server.uuid,
-            "hostname": server.udp.host_name,
-            "ip_address": server.udp.ip_address,
-            "port": server.udp.port,
+            "hostname": server.unicast.host_name,
+            "ip_address": server.unicast.ip_address,
+            "port": server.unicast.port,
             "type": server.type
         }
+
         for client_uuid, client in dict(server.discovered_clients).items():
             logger.info("Notifying client {} about new leader", client_uuid)
-            server.udp.unicast(
+            server.unicast.unicast(
                 request_response_handler.leader_info_response(server, leader_details),
                 client["ip_address"],
                 client["port"]
             )
 
-    # def declare_self_as_leader_without_restore(self, server, election_uuid):
-    #     server.is_leader = True
-    #     server.leader = server.uuid
-    #     server.broadcast.broadcast(request_response_handler.leader_election_coordination_request(election_uuid, server))
-
-    def respond_to_election(self, message, server):
+    def respond_to_election(self, message):
+        server = self.component
         logger.info("Responding to election request from {}", message["requester_uuid"])
         requester_uuid = message["requester_uuid"]
         requester_details = [
             x for x in server.discovered_servers.values()
             if x["uuid"] == requester_uuid and x["uuid"] != server.uuid
         ]
-        if requester_uuid != server.uuid and uuid_util.get_uuid_int(requester_uuid) < uuid_util.get_uuid_int(
-                server.uuid) and requester_details:
-            server.udp.unicast(request_response_handler.leader_election_response(server, message),
-                               requester_details[0]["ip_address"], requester_details[0]["port"])
-        self.declare_self_as_leader(server, uuid_util.get_uuid())
+        if requester_uuid != server.uuid and uuid_util.get_uuid_int(requester_uuid) < uuid_util.get_uuid_int(server.uuid) and requester_details:
+            server.unicast.unicast(request_response_handler.leader_election_response(server, message), requester_details[0]["ip_address"], requester_details[0]["port"])
+        self.declare_self_as_leader(uuid_util.get_uuid())
 
-    def track_election_status(self, message, server):
+    def track_election_status(self, message):
+        server = self.component
         if message["response_to"] != server.uuid:
             return
         if self.elections.get(message["election_uuid"]):
@@ -172,16 +167,13 @@ class ElectionManager:
         else:
             self.elections[message["election_uuid"]] = [message["respondent_uuid"]]
 
-    def handle_coordination_request(self, message, server):
+    def handle_coordination_request(self, message):
+        server = self.component
         if message["requester_uuid"] == server.uuid:
             return
         if uuid_util.get_uuid_int(message["requester_uuid"]) > uuid_util.get_uuid_int(server.uuid):
             server.is_leader = False
-            if server.leader:
-                if uuid_util.get_uuid_int(message["requester_uuid"]) > uuid_util.get_uuid_int(server.leader):
-                    server.leader = message["requester_uuid"]
-            else:
+            if server.leader is None or uuid_util.get_uuid_int(message["requester_uuid"]) > uuid_util.get_uuid_int(server.leader):
                 server.leader = message["requester_uuid"]
         else:
-            server.broadcast.broadcast(
-                request_response_handler.leader_election_coordination_request(uuid_util.get_uuid(), server))
+            server.broadcast.broadcast(request_response_handler.leader_election_coordination_request(uuid_util.get_uuid(), server))

@@ -1,5 +1,4 @@
 import sys
-import multiprocessing
 import threading
 import time
 
@@ -8,67 +7,104 @@ from pyfiglet import figlet_format
 from termcolor import cprint
 
 import constants
+from auction.client_auction_manager import ClientAuctionManager
 from broadcast.broadcast import Broadcast
 from constants import CLIENT
+from discovery.discovery_handler import DiscoveryHandler
+from heartbeat.hearbeat import Heartbeat
 from messages.client_messages_manager import ClientMessagesManager
-from udp.udp import UDP
+from unicast.unicast import Unicast
 from util import request_response_handler, uuid_util
 
 logger.remove()
 logger.add(sys.stderr, level=40)
-
-def require_initialization(func):
-    def wrapper(self, *args, **kwargs):
-        if self.manager is None:
-            logger.info("No manager, initializing...")
-            self.initialize()
-        return func(self, *args, **kwargs)
-
-    return wrapper
 
 
 class Client:
     def __init__(self):
         self.uuid = uuid_util.get_uuid()
         self.type = CLIENT
-        self.manager = None
         self.discovered_servers = {}
-        self.queues = None
-        logger.info("Starting Client")
-        self.broadcast = Broadcast(self)
-        self.udp = UDP(self)
-        self.messages_manager = ClientMessagesManager(self)
+        self.messages_manager = ClientMessagesManager()
+        self.broadcast = Broadcast(self.messages_manager)
+        self.unicast = Unicast(self.messages_manager)
+        self.discovery_handler = DiscoveryHandler(self)
+        self.heartbeat_manager = Heartbeat(self, constants.HEART_BEAT_INTERVAL)
+        self.auction_manager = ClientAuctionManager(self)
+        self._register_message_handlers()
         self.round_tracker = 0
         self.leader = None
         self.server = None
-        self.auction_manager = self.messages_manager.auction_manager
-        logger.info("Client {} started successfully", self.uuid)
 
-    def initialize(self):
-        self.manager = multiprocessing.Manager()
-        self.discovered_servers = self.manager.dict()
-        self.queues = request_response_handler.setup_queues(self, self.manager)
+    def _register_message_handlers(self):
+        mm = self.messages_manager
+        # Discovery
+        mm.register(
+            constants.DISCOVERY_RESPONSE,
+            self.discovery_handler.process_discovery_response,
+        )
+        # Heartbeat
+        mm.register(
+            constants.HEART_BEAT_ACK, self.heartbeat_manager.process_heartbeat_ack
+        )
+        # Auction creation and joining
+        mm.register(
+            constants.AUCTION_CREATE_ACK, self.auction_manager.handle_create_ack
+        )
+        mm.register(
+            constants.AUCTION_CREATE_DENY, self.auction_manager.handle_create_deny
+        )
+        mm.register(
+            constants.AUCTION_LIST_RESPONSE, self.auction_manager.handle_list_response
+        )
+        mm.register(constants.AUCTION_JOIN_ACK, self.auction_manager.handle_join_ack)
+        mm.register(constants.AUCTION_JOIN_DENY, self.auction_manager.handle_join_deny)
+        # Auction lifecycle
+        mm.register(
+            constants.AUCTION_READY_CHECK, self.auction_manager.handle_ready_check
+        )
+        mm.register(constants.AUCTION_START, self.auction_manager.handle_auction_start)
+        mm.register(
+            constants.AUCTION_CANCEL, self.auction_manager.handle_auction_cancel
+        )
+        # Bidding
+        mm.register(constants.ROUND_START, self.auction_manager.handle_round_start)
+        mm.register(constants.BID_BROADCAST, self.auction_manager.handle_bid_broadcast)
+        mm.register(
+            constants.ROUND_COMPLETE, self.auction_manager.handle_round_complete
+        )
+        # Auction completion
+        mm.register(
+            constants.AUCTION_WINNER, self.auction_manager.handle_auction_winner
+        )
+        mm.register(constants.AUCTION_LOSER, self.auction_manager.handle_auction_loser)
+        # Leader updates
+        mm.register(constants.LEADER_DETAILS, self.handle_leader_update)
+        mm.register(constants.REASSIGNMENT, self.auction_manager.reassign)
 
     def start_clients(self):
         logger.info("Starting client {}", self.uuid)
         self.start_chores()
 
-    @require_initialization
     def start_chores(self):
         threading.Thread(target=self.broadcast.listen, daemon=True).start()
-        threading.Thread(target=self.udp.listen, daemon=True).start()
-        [threading.Thread(target=self.messages_manager.handle_queue_messages, args=(queue_name,), daemon=True).start()
-         for queue_name in list(self.queues.keys())]
-        self.messages_manager.initiate_discovery()
+        threading.Thread(target=self.unicast.listen, daemon=True).start()
+        self.messages_manager.start()
+        self.initiate_discovery()
         discovery_start = time.time()
-        self.messages_manager.heartbeat_manager.send_heartbeat()
+        self.heartbeat_manager.send_heartbeat()
         self.period_debug_info()
 
         # Display auction banner
-        cprint(figlet_format('AUCTION', font='dos_rebel'), 'green', "on_black", attrs=['bold'])
+        cprint(
+            figlet_format("AGORA", font="dos_rebel"),
+            "green",
+            "on_black",
+            attrs=["bold"],
+        )
         print("Finding a server...")
         print(f"You are: {self.uuid}")
-        print(f"Listening on: {self.udp.ip_address}:{self.udp.port}")
+        print(f"Listening on: {self.unicast.ip_address}:{self.unicast.port}")
         print("(Make sure the server is running first)")
 
         # Wait for leader discovery - retry every 10 seconds initially
@@ -77,7 +113,7 @@ class Client:
             if time.time() - discovery_start > retry_interval:
                 discovery_start = time.time()
                 print("Retrying discovery...")
-                self.messages_manager.initiate_discovery()
+                self.initiate_discovery()
             time.sleep(1)
 
         # Set server in auction manager
@@ -93,10 +129,14 @@ class Client:
         """Main auction menu loop."""
         while True:
             try:
-                logger.debug("Menu loop: is_finished={}, ready_to_confirm={}, is_bidding={}, is_active={}, is_waiting={}",
-                           self.auction_manager.is_finished, self.auction_manager.ready_to_confirm,
-                           self.auction_manager.is_bidding, self.auction_manager.is_active,
-                           self.auction_manager.is_waiting_for_start)
+                logger.debug(
+                    "Menu loop: is_finished={}, ready_to_confirm={}, is_bidding={}, is_active={}, is_waiting={}",
+                    self.auction_manager.is_finished,
+                    self.auction_manager.ready_to_confirm,
+                    self.auction_manager.is_bidding,
+                    self.auction_manager.is_active,
+                    self.auction_manager.is_waiting_for_start,
+                )
 
                 if self.auction_manager.is_finished:
                     print("\nAuction ended. Returning to main menu...")
@@ -106,9 +146,14 @@ class Client:
                     self.handle_auctioneer_confirm()
                 elif self.auction_manager.is_bidding:
                     self.handle_bidding()
-                elif self.auction_manager.is_active and not self.auction_manager.is_bidding:
+                elif (
+                    self.auction_manager.is_active
+                    and not self.auction_manager.is_bidding
+                ):
                     # Auction is active but waiting for round to start
-                    logger.debug("Waiting for round to start (is_active=True, is_bidding=False)")
+                    logger.debug(
+                        "Waiting for round to start (is_active=True, is_bidding=False)"
+                    )
                     time.sleep(0.5)
                 elif self.auction_manager.is_waiting_for_start:
                     print(".", end="", flush=True)
@@ -179,7 +224,9 @@ class Client:
                 return
 
             print(f"\nCreating auction for '{item_name}'...")
-            self.auction_manager.create_auction(item_name, min_bid_price, min_rounds, min_bidders)
+            self.auction_manager.create_auction(
+                item_name, min_bid_price, min_rounds, min_bidders
+            )
 
             # Wait for response
             time.sleep(2)
@@ -203,8 +250,10 @@ class Client:
         print(f"\n{'ID':<8} {'Item':<20} {'Min Bid':<10} {'Rounds':<8} {'Bidders':<10}")
         print("-" * 60)
         for i, auction in enumerate(auctions, 1):
-            print(f"{i:<8} {auction['item_name'][:18]:<20} ${auction['min_bid_price']:<9.2f} "
-                  f"{auction['min_rounds']:<8} {auction['current_bidders']}/{auction['min_bidders']:<9}")
+            print(
+                f"{i:<8} {auction['item_name'][:18]:<20} ${auction['min_bid_price']:<9.2f} "
+                f"{auction['min_rounds']:<8} {auction['current_bidders']}/{auction['min_bidders']:<9}"
+            )
 
     def handle_join_auction(self):
         """Handle joining an auction."""
@@ -222,11 +271,15 @@ class Client:
         print(f"\n{'#':<4} {'Item':<20} {'Min Bid':<10} {'Bidders':<10}")
         print("-" * 50)
         for i, auction in enumerate(auctions, 1):
-            print(f"{i:<4} {auction['item_name'][:18]:<20} ${auction['min_bid_price']:<9.2f} "
-                  f"{auction['current_bidders']}/{auction['min_bidders']}")
+            print(
+                f"{i:<4} {auction['item_name'][:18]:<20} ${auction['min_bid_price']:<9.2f} "
+                f"{auction['current_bidders']}/{auction['min_bidders']}"
+            )
 
         try:
-            choice_str = input("\nEnter auction number to join (or 0 to cancel): ").strip()
+            choice_str = input(
+                "\nEnter auction number to join (or 0 to cancel): "
+            ).strip()
             choice = int(choice_str)
 
             if choice == 0:
@@ -246,22 +299,31 @@ class Client:
         """Handle auctioneer confirmation to start."""
         try:
             confirm = input("Start auction now? (y/n): ").strip().lower()
-            if confirm == 'y':
+            if confirm == "y":
                 self.auction_manager.confirm_start()
                 # Wait for auction to start and first round to begin
                 print("Starting auction...")
                 wait_count = 0
                 while not self.auction_manager.is_bidding and wait_count < 20:
-                    logger.info("Waiting for is_bidding... is_active={}, is_bidding={}, wait_count={}",
-                               self.auction_manager.is_active, self.auction_manager.is_bidding, wait_count)
+                    logger.info(
+                        "Waiting for is_bidding... is_active={}, is_bidding={}, wait_count={}",
+                        self.auction_manager.is_active,
+                        self.auction_manager.is_bidding,
+                        wait_count,
+                    )
                     time.sleep(0.5)
                     wait_count += 1
                 if self.auction_manager.is_bidding:
                     print("Auction started! You can now bid.")
                 else:
-                    logger.warning("Timeout waiting for auction to start. is_active={}, is_bidding={}",
-                                  self.auction_manager.is_active, self.auction_manager.is_bidding)
-                    print("Timeout waiting for auction to start. Please check server logs.")
+                    logger.warning(
+                        "Timeout waiting for auction to start. is_active={}, is_bidding={}",
+                        self.auction_manager.is_active,
+                        self.auction_manager.is_bidding,
+                    )
+                    print(
+                        "Timeout waiting for auction to start. Please check server logs."
+                    )
             else:
                 print("Waiting for more bidders...")
                 self.auction_manager.ready_to_confirm = False
@@ -270,18 +332,35 @@ class Client:
 
     def handle_bidding(self):
         """Handle bidding input."""
-        logger.info("In handle_bidding: is_active={}, is_bidding={}, is_auctioneer={}",
-                   self.auction_manager.is_active,
-                   self.auction_manager.is_bidding,
-                   self.auction_manager.is_auctioneer)
+        logger.info(
+            "In handle_bidding: is_active={}, is_bidding={}, is_auctioneer={}",
+            self.auction_manager.is_active,
+            self.auction_manager.is_bidding,
+            self.auction_manager.is_auctioneer,
+        )
         try:
-            bid_str = input(f"  Your bid (min ${self.auction_manager.min_bid_price}): $").strip()
+            bid_str = input(
+                f"  Your bid (min ${self.auction_manager.min_bid_price}): $"
+            ).strip()
             bid_amount = float(bid_str)
             self.auction_manager.submit_bid(bid_amount)
         except ValueError:
             print("  Invalid bid amount. Please enter a number.")
         except (EOFError, KeyboardInterrupt):
             raise
+
+    def handle_leader_update(self, message):
+        """Handle LEADER_DETAILS message — update leader and reconnect auction manager."""
+        leader_server = message["leader_details"]
+        self.leader = leader_server["uuid"]
+        if self.leader not in self.discovered_servers:
+            self.discovered_servers[leader_server["uuid"]] = leader_server
+        self.auction_manager.set_server(leader_server)
+        self.heartbeat_manager.election_triggered = False
+        logger.info("Received new leader info: {}", leader_server["uuid"])
+
+    def initiate_discovery(self):
+        self.broadcast.broadcast(request_response_handler.discovery_request(self))
 
     def period_debug_info(self):
         try:
