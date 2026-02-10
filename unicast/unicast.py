@@ -35,7 +35,7 @@ class Unicast:
     def listen(self):
         try:
             while True:
-                data, client_address = self.socket.recvfrom(8192)
+                data, client_address = self.socket.recvfrom(65535)
                 message = json.loads(data.decode())
                 logger.debug("Received unicast message type {} from {}", message.get("type", "unknown"), client_address)
                 self.message_manager.enqueue(message)
@@ -43,4 +43,4 @@ class Unicast:
             logger.error("Caught exception {}", e)
             raise KeyboardInterrupt
         finally:
-            logger.critical("UDP listener for {} shutting down", self.component.uuid)
+            logger.critical("UDP listener shutting down")

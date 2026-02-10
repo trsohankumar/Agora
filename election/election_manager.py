@@ -82,6 +82,9 @@ class ElectionManager:
         logger.info("Starting periodic state replication as leader")
         server.replication_manager.start_periodic_replication()
 
+        # Start periodic heartbeat checking for client/server failures
+        server.heartbeat_manager.start_leader_heartbeat_check()
+
     def restore_state(self):
         server = self.component
         replication_manager = server.replication_manager
@@ -156,7 +159,8 @@ class ElectionManager:
         ]
         if requester_uuid != server.uuid and uuid_util.get_uuid_int(requester_uuid) < uuid_util.get_uuid_int(server.uuid) and requester_details:
             server.unicast.unicast(request_response_handler.leader_election_response(server, message), requester_details[0]["ip_address"], requester_details[0]["port"])
-        self.declare_self_as_leader(uuid_util.get_uuid())
+            # Start own election — there may be even higher-ranked servers
+            self.send_election_request()
 
     def track_election_status(self, message):
         server = self.component

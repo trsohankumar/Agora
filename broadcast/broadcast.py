@@ -35,7 +35,7 @@ class Broadcast:
             logger.info("Listening for broadcast messages at port {}", BROADCAST_PORT)
             try:
                 while True:
-                    data, addr = broadcast_socket.recvfrom(8192)
+                    data, addr = broadcast_socket.recvfrom(65535)
                     if data:
                         message = json.loads(data.decode())
                         logger.debug("Received from addr{} : msg {}", str(addr), message)

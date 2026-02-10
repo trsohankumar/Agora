@@ -23,8 +23,12 @@ class Heartbeat:
                 recents[server] = timestamp
         return recents
 
+    def start_leader_heartbeat_check(self):
+        """Start periodic heartbeat checking. Called once when server becomes leader."""
+        self.leader_heartbeat_info()
+
     def leader_heartbeat_info(self):
-        threading.Timer(60, self.leader_heartbeat_info).start()
+        threading.Timer(constants.HEART_BEAT_TIMEOUT, self.leader_heartbeat_info).start()
         recent_heartbeats = self.find_latest_heartbeat()
         for node_uuid, recent_heartbeat in recent_heartbeats.items():
             if time.time() - recent_heartbeat > constants.HEART_BEAT_TIMEOUT:
@@ -88,7 +92,6 @@ class Heartbeat:
             logger.debug("Server is not the leader, skipping heartbeat processing")
             return
         
-        self.leader_heartbeat_info()
         requester_uuid = heartbeat["requester_uuid"]
         logger.debug("{} got heartbeat ({}) from {}", self.component.type, heartbeat["heart_beat_uuid"], requester_uuid)
 

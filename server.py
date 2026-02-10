@@ -132,9 +132,10 @@ class Server:
         while time.time() - start_time < max_wait_time:
             if replication_manager.has_replicated_state():
                 logger.info("Received replicated state, ready for election")
+                break
             time.sleep(0.5)
-
-        logger.warning("Timeout waiting for state sync after {}s", max_wait_time)
+        else:
+            logger.warning("Timeout waiting for state sync after {}s", max_wait_time)
 
     def initiate_discovery(self):
         self.broadcast.broadcast(request_response_handler.discovery_request(self))
