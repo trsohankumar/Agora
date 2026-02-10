@@ -19,6 +19,7 @@ class Unicast:
         self.ip_address = get_ip_address()
         self.port = self.socket.getsockname()[1]
         self.message_manager = message_manager
+        logger.info("Server has ip: {} and port: {}", self.ip_address, self.port)
         
     def unicast(self, message, target_address, target_port, wait=False):
         logger.debug("Unicasting message : {}", message)
