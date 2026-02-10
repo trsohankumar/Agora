@@ -224,8 +224,9 @@ class ServerAuctionManager:
         # Trigger state replication to backups
         self._trigger_replication()
 
-        # Check if we have enough bidders to start
-        if len(list(auction["participants"])) >= auction["min_bidders"]:
+        # Check if we have enough bidders to start (exclude auctioneer)
+        bidder_count = len([p for p in auction["participants"] if p != auction["auctioneer_uuid"]])
+        if bidder_count >= auction["min_bidders"]:
             self.send_ready_check(auction_id)
 
     def send_ready_check(self, auction_id):
@@ -253,7 +254,7 @@ class ServerAuctionManager:
 
         self.server.unicast.unicast(
             request_response_handler.auction_ready_check(
-                self.server, auction_id, len(list(auction["participants"]))
+                self.server, auction_id, len([p for p in auction["participants"] if p != auctioneer_uuid])
             ),
             auctioneer["ip_address"],
             auctioneer["port"],

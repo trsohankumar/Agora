@@ -300,29 +300,7 @@ class Client:
             confirm = input("Start auction now? (y/n): ").strip().lower()
             if confirm == "y":
                 self.auction_manager.confirm_start()
-                # Wait for auction to start and first round to begin
                 print("Starting auction...")
-                wait_count = 0
-                while not self.auction_manager.is_bidding and wait_count < 20:
-                    logger.info(
-                        "Waiting for is_bidding... is_active={}, is_bidding={}, wait_count={}",
-                        self.auction_manager.is_active,
-                        self.auction_manager.is_bidding,
-                        wait_count,
-                    )
-                    time.sleep(0.5)
-                    wait_count += 1
-                if self.auction_manager.is_bidding:
-                    print("Auction started! You can now bid.")
-                else:
-                    logger.warning(
-                        "Timeout waiting for auction to start. is_active={}, is_bidding={}",
-                        self.auction_manager.is_active,
-                        self.auction_manager.is_bidding,
-                    )
-                    print(
-                        "Timeout waiting for auction to start. Please check server logs."
-                    )
             else:
                 print("Waiting for more bidders...")
                 self.auction_manager.ready_to_confirm = False

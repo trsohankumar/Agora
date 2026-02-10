@@ -162,7 +162,8 @@ class ClientAuctionManager:
         print(f"  Item: {self.item_name}")
         print(f"  Minimum bid: ${self.min_bid_price}")
         print(f"  Rounds: {self.min_rounds}")
-        print(f"  Participants: {len(self.participants)}")
+        bidder_count = len([p for p in self.participants if p != self.client.uuid]) if self.is_auctioneer else len(self.participants) - 1
+        print(f"  Bidders: {bidder_count}")
         print(f"{'='*50}")
 
     def handle_round_start(self, message):
