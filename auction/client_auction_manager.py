@@ -298,6 +298,7 @@ class ClientAuctionManager:
         print(f"  Item: {item_name}")
         print(f"  Reason: {reason}")
         print(f"{'='*50}")
+        print("  Press Enter to return to menu...")
 
     def retransmit_last_bid(self):
         """Retransmit the last bid if no response received."""

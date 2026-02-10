@@ -341,9 +341,14 @@ class Client:
             bid_str = input(
                 f"  Your bid (min ${self.auction_manager.min_bid_price}): $"
             ).strip()
+            # Auction may have been cancelled while waiting for input
+            if self.auction_manager.is_finished or not self.auction_manager.is_active:
+                return
             bid_amount = float(bid_str)
             self.auction_manager.submit_bid(bid_amount)
         except ValueError:
+            if self.auction_manager.is_finished:
+                return
             print("  Invalid bid amount. Please enter a number.")
         except (EOFError, KeyboardInterrupt):
             raise
