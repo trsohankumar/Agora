@@ -64,7 +64,6 @@ class Server:
         # Replication
         mm.register(constants.STATE_REPLICATE, self.replication_manager.receive_replicated_state)
         mm.register(constants.STATE_REPLICATION_REQUEST, self.replication_manager.handle_state_request)
-        mm.register(constants.REASSIGNMENT, self.auction_manager.start_reassignment)
 
     def start_server(self):
         logger.info("Server {} started", self.uuid)

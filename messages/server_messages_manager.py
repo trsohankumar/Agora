@@ -39,8 +39,7 @@ class ServerMessagesManager:
                 | constants.BID_SUBMIT_RETRANSMIT:
                 self.queues['client'].append(message)
             case constants.STATE_REPLICATE \
-                | constants.STATE_REPLICATION_REQUEST \
-                | constants.REASSIGNMENT:
+                | constants.STATE_REPLICATION_REQUEST:
                 self.queues['replication'].append(message)
 
     def start(self):

@@ -689,50 +689,54 @@ class ServerAuctionManager:
         del self.auctions[auction_id]
         logger.info("Auction {} removed from active auctions", auction_id)
 
-    def reassign_server(self, failed_server):
-        """Notify other servers about a failed server."""
-        logger.info("Server {} failed, initiating reassignment", failed_server)
+    def remove_client(self, client_uuid):
+        """Remove a failed client from all auctions and client lists."""
+        logger.info("Removing failed client {} from system", client_uuid)
 
-        # Check if the failed server had any auctions
         for auction_id, auction in dict(self.auctions).items():
-            # If this server is the new leader, it needs to take over
-            if self.server.is_leader:
-                logger.info("Taking over auction {} from failed server", auction_id)
+            if auction["status"] not in ("waiting", "active"):
+                continue
 
-        # Notify other servers about the failure
-        for server_uuid, server_details in dict(self.server.discovered_servers).items():
-            if server_uuid != failed_server:
-                self.server.unicast.unicast(
-                    request_response_handler.reassignment(failed_server, self.server),
-                    server_details["ip_address"],
-                    server_details["port"],
+            if client_uuid not in list(auction["participants"]):
+                continue
+
+            # If client is the auctioneer, cancel the entire auction
+            if auction["auctioneer_uuid"] == client_uuid:
+                logger.warning(
+                    "Failed client {} is the auctioneer of auction {}. Cancelling.",
+                    client_uuid, auction_id,
                 )
+                self.cancel_auction(auction_id, "Auctioneer disconnected (heartbeat timeout).")
+                continue
 
-    def start_reassignment(self, message):
-        """Handle reassignment after server failure."""
-        failed_server = (
-            message["failed_uuid"]
-            if "failed_uuid" in message
-            else message["requester_uuid"]
-        )
-        logger.info("Starting reassignment process for failed server {}", failed_server)
+            # Client is a bidder — remove from participants
+            auction["participants"].remove(client_uuid)
+            logger.info(
+                "Removed client {} from auction {}. Remaining participants: {}",
+                client_uuid, auction_id, len(auction["participants"]),
+            )
 
-        replication_manager = self.server.replication_manager
-        existing_clients = dict(self.clients)
-
-        # Restore from replicated state if available
-        if replication_manager.has_replicated_state():
-            logger.info("Restoring state from replication for reassignment")
-            replication_manager.restore_from_replicated_state()
-
-        # Notify clients that were connected to the failed server
-        for client, client_details in self.clients.items():
-            if client not in existing_clients:
-                self.server.unicast.unicast(
-                    request_response_handler.auction_reassignment(self.server),
-                    client_details["ip_address"],
-                    client_details["port"],
+            # If only the auctioneer is left, cancel
+            if len(auction["participants"]) <= 1:
+                logger.warning(
+                    "Auction {} has no bidders left after removing {}. Cancelling.",
+                    auction_id, client_uuid,
                 )
+                self.cancel_auction(auction_id, "Not enough participants (client disconnected).")
+                continue
+
+            # If auction is active, remove all bids by this client and check if round completes
+            if auction["status"] == "active":
+                for round_num, round_bids in auction["bids"].items():
+                    round_bids.pop(client_uuid, None)
+                self.check_round_complete(auction_id)
+
+        # Remove from client tracking dicts
+        self.clients.pop(client_uuid, None)
+        self.server.discovered_clients.pop(client_uuid, None)
+
+        logger.info("Client {} fully removed from system", client_uuid)
+        self._trigger_replication()
 
     def _trigger_replication(self):
         """Trigger immediate state replication to backup servers."""

@@ -132,31 +132,6 @@ def request_state_replication(component):
     }
 
 
-def reassignment(failed_server, component):
-    return {
-        "type": constants.REASSIGNMENT,
-        "requester_uuid": component.uuid,
-        "requester_type": component.type,
-        "failed_uuid": failed_server,
-        "timestamp": time.time()
-    }
-
-
-def auction_reassignment(component):
-    return {
-        "type": constants.REASSIGNMENT,
-        "requester_type": component.type,
-        "requester_uuid": component.uuid,
-        "timestamp": time.time(),
-        "details": {
-            "uuid": component.uuid,
-            "hostname": component.unicast.host_name,
-            "ip_address": component.unicast.ip_address,
-            "port": component.unicast.port,
-            "type": component.type
-        }
-    }
-
 
 # Auction Creation & Joining Messages
 

@@ -14,7 +14,6 @@ class Heartbeat:
         self.heartbeat_interval = heartbeat_interval
         self.heartbeats = {}
         self.election_triggered = False
-        self.failed = []
         self.connected_since = None  # Track when we connected to leader
 
     def find_latest_heartbeat(self):
@@ -27,10 +26,19 @@ class Heartbeat:
     def leader_heartbeat_info(self):
         threading.Timer(60, self.leader_heartbeat_info).start()
         recent_heartbeats = self.find_latest_heartbeat()
-        for server, recent_heartbeat in recent_heartbeats.items():
-            if server not in self.failed and time.time() - recent_heartbeat > constants.HEART_BEAT_TIMEOUT:
-                self.failed.append(server)
-                self.component.auction_manager.reassign_server(server)
+        for node_uuid, recent_heartbeat in recent_heartbeats.items():
+            if time.time() - recent_heartbeat > constants.HEART_BEAT_TIMEOUT:
+                # Clean up heartbeat entries for this node so it won't be re-processed
+                self.heartbeats = {
+                    k: v for k, v in self.heartbeats.items() if k[0] != node_uuid
+                }
+                # Check if the failed node is a client
+                if hasattr(self.component, 'discovered_clients') and node_uuid in self.component.discovered_clients:
+                    logger.warning("Client {} heartbeat timeout. Removing from system.", node_uuid)
+                    self.component.auction_manager.remove_client(node_uuid)
+                else:
+                    logger.warning("Server {} heartbeat timeout. Removing from discovered servers.", node_uuid)
+                    self.component.discovered_servers.pop(node_uuid, None)
 
     def send_heartbeat(self):
         # periodically run this function

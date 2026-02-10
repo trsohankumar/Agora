@@ -311,11 +311,6 @@ class ClientAuctionManager:
                 self.server["ip_address"], self.server["port"]
             )
 
-    def reassign(self, message):
-        """Handle server reassignment."""
-        self.server = message.get("details", self.server)
-        logger.info("Reassigned to new server: {}", self.server)
-
     def handle_leader_failure(self):
         """Handle leader server failure."""
         logger.warning("Leader server failed!")

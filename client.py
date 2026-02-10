@@ -80,7 +80,6 @@ class Client:
         mm.register(constants.AUCTION_LOSER, self.auction_manager.handle_auction_loser)
         # Leader updates
         mm.register(constants.LEADER_DETAILS, self.handle_leader_update)
-        mm.register(constants.REASSIGNMENT, self.auction_manager.reassign)
 
     def start_clients(self):
         logger.info("Starting client {}", self.uuid)
