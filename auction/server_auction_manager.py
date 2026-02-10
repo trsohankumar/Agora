@@ -224,8 +224,6 @@ class ServerAuctionManager:
         # Trigger state replication to backups
         self._trigger_replication()
 
-        self.print_auction_sessions()
-
         # Check if we have enough bidders to start
         if len(list(auction["participants"])) >= auction["min_bidders"]:
             self.send_ready_check(auction_id)
@@ -638,22 +636,6 @@ class ServerAuctionManager:
                 )
                 self.start_round(auction_id)
 
-    def print_auction_sessions(self):
-        """Log active auction sessions."""
-        if not self.auctions:
-            logger.info("No active auction sessions.")
-        else:
-            logger.info("Current Auction Sessions:")
-            for auction_id, auction in dict(self.auctions).items():
-                logger.info(
-                    "  Auction ID: {} | Item: {} | Status: {} | Participants: {} | Round: {}",
-                    auction_id,
-                    auction["item_name"],
-                    auction["status"],
-                    len(list(auction["participants"])),
-                    auction["current_round"],
-                )
-
     def cancel_auction(self, auction_id, reason="Auction cancelled"):
         """Cancel an auction and notify all participants."""
         if auction_id not in self.auctions:
@@ -704,25 +686,33 @@ class ServerAuctionManager:
             if auction["auctioneer_uuid"] == client_uuid:
                 logger.warning(
                     "Failed client {} is the auctioneer of auction {}. Cancelling.",
-                    client_uuid, auction_id,
+                    client_uuid,
+                    auction_id,
                 )
-                self.cancel_auction(auction_id, "Auctioneer disconnected (heartbeat timeout).")
+                self.cancel_auction(
+                    auction_id, "Auctioneer disconnected (heartbeat timeout)."
+                )
                 continue
 
             # Client is a bidder — remove from participants
             auction["participants"].remove(client_uuid)
             logger.info(
                 "Removed client {} from auction {}. Remaining participants: {}",
-                client_uuid, auction_id, len(auction["participants"]),
+                client_uuid,
+                auction_id,
+                len(auction["participants"]),
             )
 
             # If only the auctioneer is left, cancel
             if len(auction["participants"]) <= 1:
                 logger.warning(
                     "Auction {} has no bidders left after removing {}. Cancelling.",
-                    auction_id, client_uuid,
+                    auction_id,
+                    client_uuid,
                 )
-                self.cancel_auction(auction_id, "Not enough participants (client disconnected).")
+                self.cancel_auction(
+                    auction_id, "Not enough participants (client disconnected)."
+                )
                 continue
 
             # If auction is active, remove all bids by this client and check if round completes
