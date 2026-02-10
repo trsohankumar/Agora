@@ -101,8 +101,6 @@ class Server:
         # start sending heartbeats now
         self.heartbeat_manager.send_heartbeat()
 
-        # Period debug task to print the elected leaders
-        self.print_debug_info()
 
         while True:
             try:
@@ -140,27 +138,6 @@ class Server:
 
     def initiate_discovery(self):
         self.broadcast.broadcast(request_response_handler.discovery_request(self))
-
-    def print_debug_info(self):
-        try:
-            self.round_tracker += 1
-            logger.debug("Server {} - Debug Info - {}", self.uuid, self.round_tracker)
-            logger.debug("Server {} is leader {}", self.uuid, self.is_leader)
-            logger.debug("Server {} - leader is {}", self.uuid, self.leader)
-            logger.debug("Server {} - leader details {}", self.uuid, self.discovered_servers.get(self.leader, None))
-            logger.debug("Server {} - discovered servers {}", self.uuid, len(list(self.discovered_servers.keys())))
-            logger.debug("Server {} - discovered servers list {}", self.uuid, self.discovered_servers)
-            logger.debug("Server {} - discovered clients {}", self.uuid, len(list(self.discovered_clients.keys())))
-            logger.debug("Server {} - discovered clients list {}", self.uuid, self.discovered_clients)
-            logger.debug("Server {} - {}:{}", self.uuid, self.unicast.ip_address, self.unicast.port)
-
-            # Print the auction sessions managed by this server
-            self.auction_manager.print_auction_sessions()
-
-            threading.Timer(40, self.print_debug_info).start()
-        except Exception:
-            raise KeyboardInterrupt
-
 
 if __name__ == "__main__":
     server = Server()
