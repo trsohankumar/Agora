@@ -170,8 +170,6 @@ class ClientAuctionManager:
         logger.info("Received ROUND_START for round {}", message.get("round"))
         self.current_round = message["round"]
         self.min_bid_price = message.get("min_bid_price", self.min_bid_price)
-        self.is_bidding = True
-        logger.info("is_bidding set to True")
 
         if self.current_round not in self.all_bids:
             self.all_bids[self.current_round] = {}
@@ -179,7 +177,12 @@ class ClientAuctionManager:
         logger.info("Round {} started", self.current_round)
         print(f"\n--- Round {self.current_round} ---")
         print(f"  Minimum bid: ${self.min_bid_price}")
-        print("  Enter your bid:")
+
+        if self.is_auctioneer:
+            print("  Waiting for bids...")
+        else:
+            self.is_bidding = True
+            print("  Enter your bid:")
 
     def submit_bid(self, bid_amount):
         """Submit a bid for the current round."""
@@ -270,7 +273,10 @@ class ClientAuctionManager:
 
         logger.info("Lost auction for '{}'. Winner: {} with ${}", item_name, winner, winning_amount)
         print(f"\n{'='*50}")
-        print(f"  Auction ended - You did not win")
+        if self.is_auctioneer:
+            print(f"  AUCTION COMPLETE")
+        else:
+            print(f"  Auction ended - You did not win")
         print(f"  Item: {item_name}")
         print(f"  Winner: {winner[:8]}... with total bid ${winning_amount}")
         print(f"\n  Final standings:")

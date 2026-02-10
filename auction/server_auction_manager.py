@@ -485,9 +485,10 @@ class ServerAuctionManager:
         auction = self.auctions[auction_id]
         current_round = auction["current_round"]
         participants = list(auction["participants"])
+        bidders = [p for p in participants if p != auction["auctioneer_uuid"]]
         round_bids = dict(auction["bids"].get(current_round, {}))
 
-        if len(round_bids) == len(participants):
+        if len(round_bids) == len(bidders):
             logger.info(
                 "All bids received for auction {} round {}", auction_id, current_round
             )
