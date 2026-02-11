@@ -94,9 +94,7 @@ class Server:
         # Trigger election
         self.election_manager.send_election_request()
         logger.info("Server {} - Leader status: {} (leader={})", self.uuid, self.is_leader, self.leader)
-        print(f"Server {self.uuid[:8]}... ready")
-        print(f"Is leader: {self.is_leader}")
-        print(f"Listening on: {self.unicast.ip_address}:{self.unicast.port}")
+
 
         # start sending heartbeats now
         self.heartbeat_manager.send_heartbeat()

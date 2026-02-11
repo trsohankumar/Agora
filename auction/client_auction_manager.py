@@ -55,17 +55,17 @@ class ClientAuctionManager:
         self.is_waiting_for_start = True
 
         logger.info("Auction created successfully! ID: {}", self.auction_id)
-        print(f"\n✓ Auction created for '{self.item_name}'")
-        print(f"  Auction ID: {self.auction_id}")
-        print(f"  Minimum bid: ${self.min_bid_price}")
-        print(f"  Minimum rounds: {self.min_rounds}")
-        print(f"  Waiting for bidders to join...")
+        print(f"\n Auction created for '{self.item_name}'")
+        print(f"Auction ID: {self.auction_id}")
+        print(f"Minimum bid: ${self.min_bid_price}")
+        print(f"Minimum rounds: {self.min_rounds}")
+        print(f"Waiting for bidders to join...")
 
     def handle_create_deny(self, message):
         """Handle auction creation denial."""
         reason = message.get("reason", "Unknown reason")
         logger.warning("Auction creation denied: {}", reason)
-        print(f"\n✗ Auction creation denied: {reason}")
+        print(f"\n Auction creation denied: {reason}")
 
     def list_available_auctions(self):
         """Request list of available auctions from server."""
@@ -108,16 +108,16 @@ class ClientAuctionManager:
 
         logger.info("Successfully joined auction {}", self.auction_id)
         print(f"\n✓ Joined auction for '{self.item_name}'")
-        print(f"  Auction ID: {self.auction_id}")
-        print(f"  Minimum bid: ${self.min_bid_price}")
-        print(f"  Minimum rounds: {self.min_rounds}")
-        print(f"  Waiting for auction to start...")
+        print(f"Auction ID: {self.auction_id}")
+        print(f"Minimum bid: ${self.min_bid_price}")
+        print(f"Minimum rounds: {self.min_rounds}")
+        print(f"Waiting for auction to start...")
 
     def handle_join_deny(self, message):
         """Handle auction join denial."""
         reason = message.get("reason", "Unknown reason")
         logger.warning("Auction join denied: {}", reason)
-        print(f"\n✗ Could not join auction: {reason}")
+        print(f"\n Could not join auction: {reason}")
 
     def handle_ready_check(self, message):
         """Handle ready check from server (auctioneer only)."""
@@ -127,7 +127,7 @@ class ClientAuctionManager:
         num_bidders = message.get("num_bidders", 0)
         logger.info("Ready check received. {} bidders joined.", num_bidders)
         print(f"\n! {num_bidders} bidders have joined!")
-        print("  Ready to start the auction?")
+        print("Ready to start the auction?")
         self.ready_to_confirm = True
 
     def confirm_start(self):
@@ -158,12 +158,12 @@ class ClientAuctionManager:
         logger.info("Auction {} started with {} participants",
                    self.auction_id, len(self.participants))
         print(f"\n{'='*50}")
-        print(f"  AUCTION STARTED!")
-        print(f"  Item: {self.item_name}")
-        print(f"  Minimum bid: ${self.min_bid_price}")
-        print(f"  Rounds: {self.min_rounds}")
+        print(f"AUCTION STARTED!")
+        print(f"Item: {self.item_name}")
+        print(f"Minimum bid: ${self.min_bid_price}")
+        print(f"Rounds: {self.min_rounds}")
         bidder_count = len([p for p in self.participants if p != self.client.uuid]) if self.is_auctioneer else len(self.participants) - 1
-        print(f"  Bidders: {bidder_count}")
+        print(f"Bidders: {bidder_count}")
         print(f"{'='*50}")
 
     def handle_round_start(self, message):
@@ -177,13 +177,13 @@ class ClientAuctionManager:
 
         logger.info("Round {} started", self.current_round)
         print(f"\n--- Round {self.current_round} ---")
-        print(f"  Minimum bid: ${self.min_bid_price}")
+        print(f"Minimum bid: ${self.min_bid_price}")
 
         if self.is_auctioneer:
-            print("  Waiting for bids...")
+            print("Waiting for bids...")
         else:
             self.is_bidding = True
-            print("  Enter your bid:")
+            print("Enter your bid:")
 
     def submit_bid(self, bid_amount):
         """Submit a bid for the current round."""
@@ -192,7 +192,7 @@ class ClientAuctionManager:
             return False
 
         if bid_amount < self.min_bid_price:
-            print(f"  Bid must be at least ${self.min_bid_price}")
+            print(f"Bid must be at least ${self.min_bid_price}")
             return False
 
         logger.info("Submitting bid of ${} for round {}", bid_amount, self.current_round)
@@ -207,7 +207,7 @@ class ClientAuctionManager:
             self.server["ip_address"], self.server["port"]
         )
 
-        print(f"  ✓ Bid of ${bid_amount} submitted")
+        print(f"Bid of ${bid_amount} submitted")
         return True
 
     def handle_bid_broadcast(self, message):
@@ -223,7 +223,7 @@ class ClientAuctionManager:
         # Show bid from other participants
         if client_uuid != self.client.uuid:
             short_uuid = client_uuid[:8]
-            print(f"  Bidder {short_uuid}... bid ${bid_amount}")
+            print(f"Bidder {short_uuid}... bid ${bid_amount}")
 
     def handle_round_complete(self, message):
         """Handle round complete notification."""
@@ -233,11 +233,11 @@ class ClientAuctionManager:
 
         logger.info("Round {} complete. Bids: {}", round_num, bids)
         print(f"\n  Round {round_num} complete!")
-        print("  Bids this round:")
+        print("Bids this round:")
         for client_uuid, amount in bids.items():
             marker = " (you)" if client_uuid == self.client.uuid else ""
             short_uuid = client_uuid[:8]
-            print(f"    {short_uuid}...: ${amount}{marker}")
+            print(f"{short_uuid}...: ${amount}{marker}")
 
     def handle_auction_winner(self, message):
         """Handle winning notification."""
@@ -251,14 +251,14 @@ class ClientAuctionManager:
 
         logger.info("WON auction for '{}' with total bid ${}", item_name, winning_amount)
         print(f"\n{'='*50}")
-        print(f"  🎉 CONGRATULATIONS! YOU WON! 🎉")
-        print(f"  Item: {item_name}")
-        print(f"  Your total bid: ${winning_amount}")
+        print(f"🎉 CONGRATULATIONS! YOU WON! 🎉")
+        print(f"Item: {item_name}")
+        print(f"Your total bid: ${winning_amount}")
         print(f"\n  Final standings:")
         for client_uuid, total in sorted(cumulative_bids.items(), key=lambda x: x[1], reverse=True):
             marker = " (you)" if client_uuid == self.client.uuid else ""
             short_uuid = client_uuid[:8]
-            print(f"    {short_uuid}...: ${total}{marker}")
+            print(f"{short_uuid}...: ${total}{marker}")
         print(f"{'='*50}")
 
     def handle_auction_loser(self, message):
@@ -278,13 +278,13 @@ class ClientAuctionManager:
             print(f"  AUCTION COMPLETE")
         else:
             print(f"  Auction ended - You did not win")
-        print(f"  Item: {item_name}")
-        print(f"  Winner: {winner[:8]}... with total bid ${winning_amount}")
+        print(f"Item: {item_name}")
+        print(f"Winner: {winner[:8]}... with total bid ${winning_amount}")
         print(f"\n  Final standings:")
         for client_uuid, total in sorted(cumulative_bids.items(), key=lambda x: x[1], reverse=True):
             marker = " (you)" if client_uuid == self.client.uuid else ""
             short_uuid = client_uuid[:8]
-            print(f"    {short_uuid}...: ${total}{marker}")
+            print(f"{short_uuid}...: ${total}{marker}")
         print(f"{'='*50}")
 
     def handle_auction_cancel(self, message):
@@ -301,11 +301,11 @@ class ClientAuctionManager:
 
         logger.info("Auction {} for '{}' cancelled: {}", self.auction_id, item_name, reason)
         print(f"\n{'='*50}")
-        print(f"  AUCTION CANCELLED")
-        print(f"  Item: {item_name}")
-        print(f"  Reason: {reason}")
+        print(f"AUCTION CANCELLED")
+        print(f"Item: {item_name}")
+        print(f"Reason: {reason}")
         print(f"{'='*50}")
-        print("  Press Enter to return to menu...")
+        print("Press Enter to return to menu...")
 
     def retransmit_last_bid(self):
         """Retransmit the last bid if no response received."""
@@ -329,7 +329,7 @@ class ClientAuctionManager:
 
         # If we were in an active auction, we need to wait for reconnection
         if self.is_active or self.is_waiting_for_start:
-            print("  Your auction session will resume when a new leader is found.")
+            print("Your auction session will resume when a new leader is found.")
             # Don't reset the auction state - we want to resume
 
     def set_server(self, server_details):
